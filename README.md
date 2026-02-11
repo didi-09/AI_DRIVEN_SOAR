@@ -223,4 +223,33 @@ We recently upgraded the system from a "Student" to a "Professional". Here is wh
 ### D. Silent Running (Disk Optimization)
 *   **Problem**: Writing every single decision to a text file (`experiences.ndjson`) created 17GB of data in minutes, slowing everything down.
 *   **Fix**: We disabled the logs (`disable_logging=True`).
-*   **Result**: The system runs at **Full Speed** (~130 steps/second) because it's not waiting for the hard drive to write "I blocked an IP" 5 million times.
+    *   **Result**: The system runs at **Full Speed** (~130 steps/second) because it's not waiting for the hard drive to write "I blocked an IP" 5 million times.
+
+---
+
+## 9. Reading the Matrix (What the Logs Mean)
+
+When you look at the black terminal screen (`training_full_speed.log`), you will see lines flying by. Here is how to translate them:
+
+### A. The "Episode End" Line
+```text
+INFO | train.train_ppo | Episode End: step=67, success=True, total_r=10.43, term=True
+```
+*   **`step=67`**: The game lasted 67 turns (minutes).
+*   **`success=True`**: The Agent **WON**. It stopped the attack without crashing the system.
+*   **`total_r=10.43`**: The Score. Anything above 5.0 is great. Above 10.0 is perfect.
+*   **`term=True`**: The game ended naturally (it didn't crash or timeout).
+
+### B. The "Genetic Algorithm" Line
+```text
+[GA] Genome 2 fitness: 10.150 (over 10 episodes)
+```
+*   **Context**: We also run a "Genetic Algorithm" (Evolution) in the background.
+*   **Meaning**: Variant #2 of the reward settings is performing very well (Average score 10.15). The system might adopt this variant to learn faster.
+
+### C. The "Global Step" Line
+```text
+INFO | train.train_ppo | Global Step: 245760 ...
+```
+*   **Meaning**: The total experience points the Brain has collected so far.
+*   **Goal**: We want this to reach **5,000,000**.
