@@ -159,8 +159,68 @@ The file `train/train_iterative.py` is the **School Schedule**. It manages the t
 
 ---
 
-## 5. Summary
+---
+
+## 6. Understanding the Dashboard (TensorBoard)
+
+When you open the dashboard, you are looking at the "Vitals" of the AI. Here is a simple guide to what the graphs mean:
+
+### A. Stage 1: The Observer (The "Vision" Test)
+*   **`train/total_loss`**: 
+    *   *What it is*: The "Inaccuracy" of the Eyes.
+    *   *Goal*: **Down is Good**. If this drops to near zero, it means the Observer has perfectly learned to translate complex logs into the 12-number report.
+
+### B. Stage 2: The Agent (The "Strategy" Test)
+*   **`charts/episodic_return`**: 
+    *   *What it is*: The "Total Score" for a full simulation round.
+    *   *Goal*: **Up is Good**. A positive score means the Agent is successfully stopping attacks without breaking the server.
+*   **`charts/entropy`**: 
+    *   *What it is*: The "Curiosity" level.
+    *   *Goal*: **Should start High and end Low**. 
+        *   High Entropy = "I'm trying random things to see what happens."
+        *   Low Entropy = "I know exactly what to do, I've stopped guessing."
+*   **`charts/policy_loss`**: 
+    *   *What it is*: The "Confusion" of the Brain during learning.
+    *   *Trend*: This will jump around a lot! Don't worry about the spikes; as long as the "Episodic Return" is going up, the Agent is learning.
+
+### C. The Curriculum (The "Level" System)
+*   **`charts/curriculum_level`**: 
+    *   *What it is*: Which "Grade" the AI is in (0 to 10).
+    *   *Goal*: **Should Step Upwards**. If it stays at 0 for too long, the Agent is failing the "Easy Mode" tests and needs more training.
+
+---
+
+## 7. Summary
 1.  **Simulator** creates a virtual world.
 2.  **Observer** watches the world and translates logs to numbers.
 3.  **Agent** watches the numbers and presses buttons to stop attacks.
 4.  **Training** makes them both better over time by repeating the process 50 times.
+
+---
+
+## 8. Latest Upgrades (The "Pro" Mode)
+
+We recently upgraded the system from a "Student" to a "Professional". Here is what changed:
+
+### A. Continuous PPO (No More Recess)
+*   **Old Way (Iterative)**: Train for 10 minutes, stop, test, repeat.
+    *   *Problem*: The AI would sometimes "forget" what it learned during the break.
+*   **New Way (Continuous)**: Train for **5 Million Steps** without stopping.
+    *   *Benefit*: The AI learns strictly from experience, building deep intuition (Mastery).
+
+### B. Locked Observer ("Trusted Eyes")
+*   **Concept**: We successfully trained the Observer to 95% accuracy.
+*   **Change**: We **Locked** the Observer model. It is no longer learning; it is just *working*.
+*   **Why?**: If the Eyes keep changing how they see the world, the Brain gets confused. By locking the Eyes, the Brain can focus 100% on strategy.
+
+### C. GPU Turbo Mode (Batching)
+*   **The Bottleneck**: The simulation (CPU) is slow, but the learning (GPU) is fast.
+*   **The Fix**:
+    1.  **Rollout Length (8192)**: The CPU plays the game for 8,000 steps to gather a huge pile of data.
+    2.  **Batch Size (4096)**: The GPU takes that huge pile and learns from it all at once.
+*   **Result**: We utilize the hardware efficiently. The CPU works hard to feed the hungry GPU.
+
+### D. Silent Running (Disk Optimization)
+*   **Problem**: Writing every single decision to a text file (`experiences.ndjson`) created 17GB of data in minutes, slowing everything down.
+*   **Fix**: We disabled the logs (`disable_logging=True`).
+*   **Result**: The system runs at **Full Speed** (~130 steps/second) because it's not waiting for the hard drive to write "I blocked an IP" 5 million times.
