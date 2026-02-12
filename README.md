@@ -1,241 +1,191 @@
-# DIDI RL SOAR: The Complete Documentation 🛡️🧠
+# DIDI RL SOAR: The Visual Master Plan 🛡️🧠📊
 
 > [!IMPORTANT]
-> **THIS IS THE MASTER DOCUMENT.**
-> It contains **EVERYTHING**: The Theory, The Architecture Diagrams, The Installation Guide, The Usage Manual, and The Future Roadmap.
-> Ignore all other `.md` files. This is the only one you need.
+> **This is the Single Source of Truth.**
+> It documents the entire project: The Philosophy, The Architecture, The Training, and The Future.
+> **Every section includes a Diagram.**
 
 ---
 
-## Part 1: The Philosophy ("The Infinite Game") ♾️
+## 1. The Philosophy: "The Infinite Game" ♾️
 
-We do not write scripts for every attack. We create an **Interaction** that generates its own curriculum.
+We moved from **Static Scripts** to **Dynamic Interaction**.
 
-### The Problem with Traditional SOAR
-*   **Old Way**: Writing `if (alert == "Brute Force") then (block_ip)`.
-*   **Problem**: You need a new script for every new attack. You are always chasing the hackers.
-
-### The New Way (AI SOAR)
-*   **Dungeon Master (Simulator)**: Generates attacks (Nmap, Brute Force, Ransomware) based on rules.
-*   **Warrior (Agent)**: Improvises defense strategies.
-*   **Student (Observer)**: Watches the unique timeline created by their interaction and learns to understand it.
-*   **Result**: The Agent's actions warp the reality of the simulation, creating millions of unique situations for the Observer to learn from. This is why we don't need petabytes of external data.
-
----
-
-## Part 2: The Architecture (The Blueprint) 🗺️
-
-### A. The Full Workflow (The Infinite Loop)
+### Concept Diagram
 ```mermaid
-graph TD
-    subgraph "Dungeon Master (Simulator)"
-        Attack[Attacker Script] -->|Generates| Logs[Raw Logs]
-        Logs -->|Infects| Network[Network Devices]
+graph LR
+    subgraph "Old Way (Static)"
+        Alert["Alert: Brute Force"] -->|If/Else| Block["Script: Block IP"]
+        NewAttack["Alert: Zero Day"] -->|No Rule| Failure["❌ Breach"]
     end
 
-    subgraph "The Eyes (Observer)"
-        Network -->|Read by| Observer[Observer Model]
-        Observer -->|Compresses to| State[12D Confidence Vector]
-        State -->|Sent to| Brain
-    end
-
-    subgraph "The General (PPO Brain)"
-        Brain[PPO Agent] -->|Decides| Action[Action ID]
-        Action -->|Excuted by| Python[Python Script]
-    end
-
-    Python -->|Modifies| Network
-    Network -->|Changes| Logs
-```
-
-### B. The Components (Deep Dive)
-
-#### 1. The Observer (Vision System) 👁️
-How it turns "Raw Logs" into "Understanding" without human labels.
-
-```mermaid
-graph TD
-    subgraph "Input Layer (Raw Data)"
-        Logs["Syslog Text"] -->|Tokenizer| Tokens["Token IDs"]
-        Alerts["Snort Alerts"] -->|One-Hot| AlertVec["Alert Vector"]
-        Telemetry["CPU/RAM %"] -->|Normalize| TeleVec["float32 Vector"]
-    end
-
-    subgraph "Encoder Core (Compression)"
-        Tokens -->|LSTM| TextFeat["Text Features (64D)"]
-        AlertVec -->|Dense| AlertFeat["Alert Features (32D)"]
-        TeleVec -->|Dense| TeleFeat["Tele Features (32D)"]
-        
-        TextFeat & AlertFeat & TeleFeat -->|Concat| Joint["Joint Vector (128D)"]
-        Joint -->|Compress| Latent["Latent Space (Bottleneck)"]
-    end
-
-    subgraph "Output Heads (Understanding)"
-        Latent -->|Decoder| Recon["Reconstructed Input"]
-        Latent -->|Classifier| Risk["Risk Score (0-1)"]
-        Latent -->|Projector| State["12D Confidence State"]
-    end
-
-    style Latent fill:#f9f,stroke:#333,stroke-width:2px
-```
-
-
-#### 2. The Agent (Decision Brain) 🧠
-How it decides to "Isolate" or "Ignore" using Reinforcement Learning.
-
-```mermaid
-graph TD
-    subgraph "Perception"
-        State[12D From Observer] -->|Shared Layer 1| H1[Hidden 256]
-        H1 -->|Shared Layer 2| H2[Hidden 256]
-    end
-
-    subgraph "Actor (What to do)"
-        H2 -->|Policy Head| Logits[Action Logits]
-        Logits -->|Masking| Valid[Valid Actions]
-        Valid -->|Softmax| Prob[Probabilities]
-        Prob -->|Sample| Action[Selected Action ID]
-    end
-
-    subgraph "Critic (Is it good?)"
-        H2 -->|Value Head| Value[Estimated Reward]
-    end
-    
-    style Action fill:#bbf,stroke:#333,stroke-width:2px
-```
-
-#### 3. The Training Loop (How it Learns) 🏋️
-The cycle of experience gathering and optimization.
-
-```mermaid
-sequenceDiagram
-    participant Env as Environment
-    participant Obs as Observer
-    participant Agent as PPO Agent
-    participant Buffer as Experience Buffer
-    
-    loop Collect Experience (Rollout)
-        Env->>Obs: Raw Logs
-        Obs->>Agent: 12D State
-        Agent->>Env: & Action
-        Env->>Buffer: Reward & Next State
-    end
-    
-    loop Update (Optimization)
-        Buffer->>Agent: Batch of Data
-        Agent->>Agent: Calculate Advantage (GAE)
-        Agent->>Agent: Update Policy (Clip Loss)
-        Agent->>Agent: Update Value (MSE Loss)
+    subgraph "New Way (Dynamic)"
+        Sim["Simulator (Attacks)"] <-->|Interaction| Agent["AI Agent (Defense)"]
+        Interaction["Unique Timeline"] -->|Teaches| Observer["Observer (Eyes)"]
+        Observer -->|Upgrades| Agent
+        Agent -->|Adapts to| AnyAttack["✅ Any Attack"]
     end
 ```
 
 ---
 
-## Part 3: Installation & Quick Start 🚀
+## 2. The Architecture (What We Built) 🏗️
 
-### A. Setup
+The system has three main components working in a loop.
+
+### System Diagram
+```mermaid
+graph TD
+    subgraph "World (The Environment)"
+        Sim["Simulator Logic"] -->|Infects| Net["Network Devices"]
+        Net -->|Emits| Logs["Raw Logs & Alerts"]
+    end
+
+    subgraph "Stage 1: The Eyes (Observer)"
+        Logs -->|Autoencoder| Latent["12D Confidence State"]
+        Latent -->|Anomaly Score| Risk["Risk Assessment"]
+    end
+
+    subgraph "Stage 2: The Brain (PPO Agent)"
+        Latent -->|Policy Network| Decision["Action Selection"]
+        Decision -->|Executor| Action["Mitigation Action"]
+    end
+
+    Action -->|Fixes| Net
+    Action -->|Stops| Sim
+```
+
+---
+
+## 3. Component Deep Dive 🔬
+
+### A. The Observer (Vision System)
+How it turns "Noise" into "Signal" using a Hybrid Autoencoder.
+
+```mermaid
+graph TD
+    subgraph "Inputs"
+        T["Syslog Text"] & A["Snort Alerts"] & M["Metrics (CPU)"]
+    end
+
+    subgraph "Encoder (Compression)"
+        T & A & M -->|Neural Nets| Features["Feature Vectors"]
+        Features -->|Concat| Joint["Joint Representation"]
+        Joint -->|Bottleneck| State["12D Latent State"]
+    end
+
+    subgraph "Outputs (Tasks)"
+        State -->|Reconstruction| Recon["Input Reconstruction"]
+        State -->|Classification| Class["Risk Variance"]
+    end
+
+    Recon -->|Error = Anomaly| Anomaly["Check: Is this new?"]
+```
+
+### B. The Agent (Decision System)
+How it learns Strategy using Actor-Critic PPO.
+
+```mermaid
+graph TD
+    Input["12D State"] -->|Shared Layers| Hidden["Understanding of Situation"]
+
+    subgraph "The Actor (Doer)"
+        Hidden -->|Policy Head| Logits["Action Probabilities"]
+        Logits -->|Sample| Action["Selected: Isolate Server"]
+    end
+
+    subgraph "The Critic (Judge)"
+        Hidden -->|Value Head| Value["Predicted Reward: +10"]
+    end
+
+    Reward["Actual Reward"] -->|Compare| Value
+    Result["Advantage"] -->|Update| Hidden
+```
+
+---
+
+## 4. The Training Pipeline (Status: Running) 🏃‍♂️
+
+We use a **Transfer Learning** approach to build the brain.
+
+### The Learning Flow
+```mermaid
+graph LR
+    Step1["Phase 1: Bootstrapping"] -->|Static Data| Obs["Train Observer"]
+    Obs -->|Lock Model| Step2["Phase 2: Specialization"]
+    Step2 -->|Simulated interaction| Brain["Train PPO Agent"]
+    Brain -->|Active Learning| Step3["Phase 3: Fine-Tuning"]
+    Step3 -->|Loop 50x| Mastery["Mastery (Brain + Eyes)"]
+
+    style Step2 fill:#bfb,stroke:#333,stroke-width:2px
+    style Step3 fill:#fbb,stroke:#333,stroke-width:2px
+```
+
+*   **Phase 1 (Done)**: Initial knowledge.
+*   **Phase 2 (Current)**: "Pro Mode" Training (5M Steps).
+*   **Phase 3 (Next)**: Intensive Iterative Refinement.
+
+---
+
+## 5. Deployment Strategy (The Active Flywheel) 🎡
+
+How the system gets smarter *after* deployment.
+
+### The Flywheel Diagram
+```mermaid
+graph TD
+    Deploy["Agent v1.0 Live"] -->|High Confidence (>90%)| Auto["Auto-Mitigate"]
+    Deploy -->|Low Confidence (<90%)| Review["Human Review Queue"]
+    
+    Review -->|Human Label| Data["New Training Data"]
+    Data -->|Sunday Retrain| Tune["Fine-Tune Model"]
+    Tune -->|Sunday Deploy| Upgrade["Agent v2.0 Live"]
+    
+    Upgrade -->|Better Handling| Deploy
+```
+
+---
+
+## 6. Future Roadmap (What Comes Next) 🔮
+
+The concrete steps to clear "Level 5+".
+
+### The Mastery Timeline
+```mermaid
+gantt
+    title The Road to World-Class Security
+    dateFormat  X
+    axisFormat %d
+
+    section Phase 1: Tuning
+    Intensive Fine-Tuning (50 Iterations)   :active, a1, 0, 1d
+
+    section Phase 2: New Threats
+    Add Ransomware Scenario                 :a2, after a1, 4h
+    Add Stealth Mode Scenario               :a3, after a1, 4h
+    Train on New Threats                    :a4, after a2, 12h
+
+    section Phase 3: Perfection
+    Reward Shaping (Surgical Defense)       :a5, after a4, 2h
+    Deploy Active Flywheel                  :a6, after a5, 4h
+```
+
+---
+
+## 7. Operational Commands 💻
+
+### A. Check Status (Current Run)
 ```bash
-# 1. Create venv
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 2. Install dependencies
-pip install gym torch numpy networkx pandas matplotlib pyyaml
+tail -f training_full_speed.log
 ```
 
-### B. Dataset Setup
-1.  Ensure downloaded datasets are in `../Dataset/`.
-2.  Manifest is located at `datasets/manifest.yaml`.
-3.  Adapters (`datasets/adapters/`) handle parsing.
-
-### C. Running the Pipeline (The Path to Mastery)
-
-#### Phase 1: Specialization (Current / "Pro" Mode)
-**Status**: Currently Running.
-Trains the PPO Agent for 5 Million steps with the Observer Locked.
-*   **Optimization**: GPU Turbo (Batch 4096) + Silent Mode (No Disk I/O).
-```bash
-python3 train/run_continuous_ppo.py
-```
-
-#### Phase 2: Intensive Fine-Tuning (Next Step)
-**Status**: Ready to Run.
-After Phase 1 finishes, run this to perfect the "Brain + Eyes" coordination.
-*   **Action**: Runs 50 iterations of alternating training.
-*   **Speed**: **5x Faster** using the optimized `configs/curriculum.yaml` (Max 100 Devices).
+### B. Start Phase 1 (Fine-Tuning)
+*Whan current run finishes:*
 ```bash
 python3 train/train_iterative.py --iterations 50
 ```
 
-#### Phase 3: Final Evaluation
-Generate GIF visualizations of the agent defending against 13 complex scenarios:
+### C. Evaluate (Visualize)
 ```bash
-python3 eval/animate_eval.py --model_path logs/iterative_loop/ppo_continuous/latest_model.pth --scenarios all
+python3 eval/animate_eval.py --scenarios all
 ```
-
----
-
-## Part 4: Deployment Strategy (The Flywheel) 🎡
-
-You asked: *"How do we make it perfect forever?"*
-
-The answer is **Human-in-the-Loop Active Learning**.
-
-### The Circle of Life 🦁🔁
-
-1.  **Deployment (Monday - Saturday)**:
-    *   The Agent defends the network 24/7.
-    *   It handles 99.9% of alerts automatically.
-    *   **The Filter**: If it sees something weird (Confidence < 90%), it **Does Not Act**. It sends it to the "Review Pile".
-
-2.  **Human Review (Sunday Morning)**:
-    *   You drink your coffee and look at the "Review Pile" (maybe 10-20 confusing events).
-    *   You label them: *"This wasn't a hack, it was the new printer."*
-
-3.  **Retraining (Sunday Afternoon)**:
-    *   The system takes these 20 new examples.
-    *   It runs a quick **1-Hour Fine-Tuning Session**.
-    *   The Brain learns: *"Ah, Printers are friends, not food."*
-
-4.  **Redeployment (Sunday Night)**:
-    *   **Agent v2.0** goes live.
-    *   It will **never** make that mistake again.
-
-**Verdict**: This turns your security system into a living organism that gets smarter every single week.
-
----
-
-## Part 5: Deployment Reality (The Limits) 🌍
-
-You asked: *"Is it ready to be deployed in ANY new architecture?"*
-
-The answer is **Yes for the Brain**, but **Maybe for the Eyes**.
-
-### A. The Brain (Universal Strategy) 🧠✅
-*   **What it knows**: "If I see a Brute Force attack on a Critical Server, I should Block the IP."
-*   **Transferability**: **100%**. This strategy works in a Bank, a Hospital, or a Cloud Server. The logic of defense is universal.
-
-### B. The Eyes (Specific Vision) 👁️⚠️
-*   **What is knows**: "I know that `log_type=3` means an FTP login."
-*   **The Catch**: If you move to a new network that uses **completely different logs** (e.g., moving from Linux to Windows), the Eyes might get confused.
-*   **The Fix**: You don't need to retrain the Brain. You just need to give the Eyes a quick "Language Course" (Train the Observer on 5,000 samples of the new logs).
-
----
-
-## Part 6: Future Roadmap (The Path to Mastery) 🛤️
-
-| Phase | Action | Goal | Estimated Time |
-| :--- | :--- | :--- | :--- |
-| **1** | **Intensive Fine-Tuning** | Run 50 Iterations (Brain + Eyes) | ~8 Hours |
-| **2** | **New Enemies** | Add Ransomware & Stealth Attacks | ~16 Hours |
-| **3** | **Reward Shaping** | Increase Penalty for "Nuclear Options" | N/A |
-| **4** | **Mastery** | Continuous Active Learning | Forever |
-
----
-
-## Part 7: Configuration Reference
-
-*   **Curriculum**: `configs/curriculum.yaml` (The Key Speed Optimization file).
-*   **Scenarios**: `simulator/scenarios/complex_scenarios.yaml` (Edit attack phases).
-*   **PPO Params**: `train/train_ppo.py` (Edit `CONFIG` dict).
-*   **Reward Function**: `simulator/config.py` (Edit penalties/rewards).
