@@ -1,191 +1,207 @@
-# DIDI RL SOAR: The Visual Master Plan 🛡️🧠📊
+# DIDI RL SOAR: Technical Whitepaper 🛡️⚙️
 
 > [!IMPORTANT]
-> **This is the Single Source of Truth.**
-> It documents the entire project: The Philosophy, The Architecture, The Training, and The Future.
-> **Every section includes a Diagram.**
+> **This is the System Specification.**
+> It details the Architecture, Components, Training Process, and Roadmap in engineering terms.
 
 ---
 
-## 1. The Philosophy: "The Infinite Game" ♾️
+## 1. System Architecture (The Loop)
 
-We moved from **Static Scripts** to **Dynamic Interaction**.
+The SOAR System operates as a closed-loop control system. It observes the network state, processes it through two Neural Networks, and outputs mitigation actions.
 
-### Concept Diagram
-```mermaid
-graph LR
-    subgraph "Old Way (Static)"
-        Alert["Alert: Brute Force"] -->|If/Else| Block["Script: Block IP"]
-        NewAttack["Alert: Zero Day"] -->|No Rule| Failure["❌ Breach"]
-    end
-
-    subgraph "New Way (Dynamic)"
-        Sim["Simulator (Attacks)"] <-->|Interaction| Agent["AI Agent (Defense)"]
-        Interaction["Unique Timeline"] -->|Teaches| Observer["Observer (Eyes)"]
-        Observer -->|Upgrades| Agent
-        Agent -->|Adapts to| AnyAttack["✅ Any Attack"]
-    end
-```
-
----
-
-## 2. The Architecture (What We Built) 🏗️
-
-The system has three main components working in a loop.
-
-### System Diagram
+### Architecture Diagram
 ```mermaid
 graph TD
-    subgraph "World (The Environment)"
-        Sim["Simulator Logic"] -->|Infects| Net["Network Devices"]
-        Net -->|Emits| Logs["Raw Logs & Alerts"]
+    subgraph "The World (Simulator)"
+        Attacker["Attacker Script (Nmap/Exploits)"]
+        Network["Network Topology (Nodes/Links)"]
+        Logs["System Logs & Alerts"]
+        
+        Attacker -->|Generates Traffic| Network
+        Network -->|Emits Data| Logs
     end
 
-    subgraph "Stage 1: The Eyes (Observer)"
-        Logs -->|Autoencoder| Latent["12D Confidence State"]
-        Latent -->|Anomaly Score| Risk["Risk Assessment"]
+    subgraph "The Perception System (Observer)"
+        Logs -->|Preprocessing| Features["Raw Features"]
+        Features -->|Autoencoder| Latent["12D Latent State"]
+        Latent -->|Anomaly Detection| Risk["Risk Score"]
     end
 
-    subgraph "Stage 2: The Brain (PPO Agent)"
-        Latent -->|Policy Network| Decision["Action Selection"]
-        Decision -->|Executor| Action["Mitigation Action"]
+    subgraph "The Decision System (Agent)"
+        Latent -->|Policy Network| Actor["Action Probabilities"]
+        Actor -->|Sampling| ActionID["Action Selection"]
     end
 
-    Action -->|Fixes| Net
-    Action -->|Stops| Sim
+    ActionID -->|Python Execution| Mitigation["Mitigation Script"]
+    Mitigation -->|Modifies State| Network
 ```
+
+### Explanation
+1.  **The World**: The `Simulator` runs an event-driven loop where attackers target specific devices. This generates logs (Syslog, Snort) identical to a real network.
+2.  **The Perception System (Observer)**: A Multi-Modal Autoencoder reads the logs. It compresses 78 raw features into a **12-Dimensional Latent vector**. This vector represents the "essence" of the network state (e.g., "Under Attack", "Safe", "Confusing").
+3.  **The Decision System (Agent)**: A PPO (Proximal Policy Optimization) model takes the 12D vector. It outputs a discrete action ID (0-35) representing a command (e.g., "Isolate Server 3").
+4.  **Mitigation**: A deterministic Python script executes the chosen action ID, modifying the network (e.g., changing firewall rules), creating a feedback loop.
 
 ---
 
-## 3. Component Deep Dive 🔬
+## 2. Component Detail: The Observer (Vision) �️
 
-### A. The Observer (Vision System)
-How it turns "Noise" into "Signal" using a Hybrid Autoencoder.
+The Observer's job is **Dimensionality Reduction** and **Anomaly Detection**. It must convert complex, messy logs into a clean signal for the Agent.
 
+### Observer Diagram
 ```mermaid
 graph TD
-    subgraph "Inputs"
-        T["Syslog Text"] & A["Snort Alerts"] & M["Metrics (CPU)"]
+    Input_Logs["Log Text (32 seq len)"]
+    Input_Alerts["Snort Alert ID"]
+    Input_Metrics["CPU/RAM Metrics"]
+
+    subgraph "Feature Extraction"
+        Input_Logs -->|LSTM Encoder| Feat_Text["Text Features (64D)"]
+        Input_Alerts -->|Embedding| Feat_Alert["Alert Features (16D)"]
+        Input_Metrics -->|Linear| Feat_Metric["Metric Features (8D)"]
     end
 
-    subgraph "Encoder (Compression)"
-        T & A & M -->|Neural Nets| Features["Feature Vectors"]
-        Features -->|Concat| Joint["Joint Representation"]
-        Joint -->|Bottleneck| State["12D Latent State"]
+    subgraph "Fusion & Compression"
+        Feat_Text & Feat_Alert & Feat_Metric -->|Concatenate| Integrated["Joint Vector (88D)"]
+        Integrated -->|Dense Layer 1| Hidden["Hidden Layer (64D)"]
+        Hidden -->|Bottleneck| Latent["Latent State (12D)"]
     end
 
-    subgraph "Outputs (Tasks)"
-        State -->|Reconstruction| Recon["Input Reconstruction"]
-        State -->|Classification| Class["Risk Variance"]
+    subgraph "Training Objectives"
+        Latent -->|Decoder| Recon["Reconstruction Loss (MSE)"]
+        Latent -->|Classifier| Risk["Risk Score (BCE Loss)"]
     end
-
-    Recon -->|Error = Anomaly| Anomaly["Check: Is this new?"]
 ```
 
-### B. The Agent (Decision System)
-How it learns Strategy using Actor-Critic PPO.
+### Technical Explanation
+*   **Inputs**:
+    *   **Logs**: Processed via an LSTM (Long Short-Term Memory) network to handle variable-length text.
+    *   **Alerts**: Categorical data (IDs) embedded into a vector space.
+    *   **Metrics**: Continuous variables normalized to [0,1].
+*   **Latent Space (The Bottleneck)**: The model is forced to compress all this data into just **12 numbers**. This forces it to learn the most important features (e.g., "Is there an attack?") and ignore noise (e.g., "What is the timestamp?").
+*   **Reconstruction**: During pre-training, it tries to recreate the input. High error means "Unknown Pattern" (Anomaly).
 
+---
+
+## 3. Component Detail: The Agent (Brain) 🧠
+
+The Agent uses **Reinforcement Learning** (PPO) to learn strategy. It does not know *how* to block an IP, only *that* it should block it to get a reward.
+
+### Agent Diagram
 ```mermaid
 graph TD
-    Input["12D State"] -->|Shared Layers| Hidden["Understanding of Situation"]
+    State["12D Input State"]
 
-    subgraph "The Actor (Doer)"
-        Hidden -->|Policy Head| Logits["Action Probabilities"]
-        Logits -->|Sample| Action["Selected: Isolate Server"]
+    subgraph "Shared Perception"
+        State -->|Linear 256| L1["Layer 1"]
+        L1 -->|ReLU| A1["Activation"]
+        A1 -->|Linear 256| L2["Layer 2"]
     end
 
-    subgraph "The Critic (Judge)"
-        Hidden -->|Value Head| Value["Predicted Reward: +10"]
+    subgraph "The Actor (Policy Head)"
+        L2 -->|Linear Out| Logits["Unnormalized Logits"]
+        Logits -->|Action Mask| Masked["Valid Logits"]
+        Masked -->|Softmax| Prob["Probabilities"]
+        Prob -->|Categorical Sample| Action["Selected: Block IP"]
     end
 
-    Reward["Actual Reward"] -->|Compare| Value
-    Result["Advantage"] -->|Update| Hidden
+    subgraph "The Critic (Value Head)"
+        L2 -->|Linear 1| Value["Predicted Reward V(s)"]
+    end
 ```
+
+### Technical Explanation
+*   **Shared Perception**: The first two layers process the valid state to understand the situation.
+*   **The Actor**: Outputs a probability distribution over all possible actions. We use **Action Masking** to zero out invalid actions (e.g., you can't "Unblock" a server that isn't blocked).
+*   **The Critic**: Estimates "How good is this state?" This helps train the Actor by calculating the "Advantage" (Did the action make things better than expected?).
 
 ---
 
-## 4. The Training Pipeline (Status: Running) 🏃‍♂️
+## 4. The Training Pipeline 🛤️
 
-We use a **Transfer Learning** approach to build the brain.
+We use a **Curriculum Learning** approach to train these models sequentially.
 
-### The Learning Flow
-```mermaid
-graph LR
-    Step1["Phase 1: Bootstrapping"] -->|Static Data| Obs["Train Observer"]
-    Obs -->|Lock Model| Step2["Phase 2: Specialization"]
-    Step2 -->|Simulated interaction| Brain["Train PPO Agent"]
-    Brain -->|Active Learning| Step3["Phase 3: Fine-Tuning"]
-    Step3 -->|Loop 50x| Mastery["Mastery (Brain + Eyes)"]
-
-    style Step2 fill:#bfb,stroke:#333,stroke-width:2px
-    style Step3 fill:#fbb,stroke:#333,stroke-width:2px
-```
-
-*   **Phase 1 (Done)**: Initial knowledge.
-*   **Phase 2 (Current)**: "Pro Mode" Training (5M Steps).
-*   **Phase 3 (Next)**: Intensive Iterative Refinement.
-
----
-
-## 5. Deployment Strategy (The Active Flywheel) 🎡
-
-How the system gets smarter *after* deployment.
-
-### The Flywheel Diagram
+### Pipeline Diagram
 ```mermaid
 graph TD
-    Deploy["Agent v1.0 Live"] -->|High Confidence (>90%)| Auto["Auto-Mitigate"]
-    Deploy -->|Low Confidence (<90%)| Review["Human Review Queue"]
-    
-    Review -->|Human Label| Data["New Training Data"]
-    Data -->|Sunday Retrain| Tune["Fine-Tune Model"]
-    Tune -->|Sunday Deploy| Upgrade["Agent v2.0 Live"]
-    
-    Upgrade -->|Better Handling| Deploy
+    subgraph "Phase 1: Bootstrapping"
+        Dataset["CIC-IDS2017 Dataset"] -->|Supervised Learning| Obs_Pre["Pre-trained Observer"]
+    end
+
+    subgraph "Phase 2: Specialization (Current)"
+        Obs_Pre -->|Locked Weights| Obs_Fixed["Fixed Observer"]
+        Sim["Simulator (Curriculum Level 1-4)"] -->|Interacts| Agent["PPO Agent"]
+        Obs_Fixed -->|Provides State| Agent
+        Agent -->|Updates| Agent_Trained["Specialized Agent"]
+    end
+
+    subgraph "Phase 3: Fine-Tuning (Next)"
+        Agent_Trained -->|Generates Traces| New_Data["Agent-Specific Data"]
+        New_Data -->|Retrains| Obs_Final["Specialized Observer"]
+        Obs_Final -->|Refines| Agent_Final["Master Agent"]
+    end
 ```
+
+### Explanation
+1.  **Bootstrapping**: We teach the Observer what "Generic Attacks" look like using a public dataset.
+2.  **Specialization**: We freeze the Observer. The Agent plays millions of games in the Simulator to learn strategy.
+3.  **Fine-Tuning**: The Agent's unique strategy creates new traffic patterns. We unfreeze the Observer and train it on *this specific Agent's behavior*, creating a perfectly synchronized team.
 
 ---
 
-## 6. Future Roadmap (What Comes Next) 🔮
+## 5. Future Roadmap (Timeline to Mastery) �
 
-The concrete steps to clear "Level 5+".
+This timelines outlines the engineering tasks required to move from "Prototype" to "Production".
 
-### The Mastery Timeline
+### Gantt Chart
 ```mermaid
 gantt
-    title The Road to World-Class Security
+    title Engineering Roadmap
     dateFormat  X
-    axisFormat %d
-
+    axisFormat Day %d
+    
+    section Optimization
+    Current Training Run (5M Steps)      :active, t1, 0, 1d
+    
     section Phase 1: Tuning
-    Intensive Fine-Tuning (50 Iterations)   :active, a1, 0, 1d
-
-    section Phase 2: New Threats
-    Add Ransomware Scenario                 :a2, after a1, 4h
-    Add Stealth Mode Scenario               :a3, after a1, 4h
-    Train on New Threats                    :a4, after a2, 12h
-
-    section Phase 3: Perfection
-    Reward Shaping (Surgical Defense)       :a5, after a4, 2h
-    Deploy Active Flywheel                  :a6, after a5, 4h
+    Config Optimization (100 Devices)    :done,   t2, 0, 0
+    Iterative Fine-Tuning (50 Cycles)    :         t3, after t1, 1d
+    
+    section Phase 2: Features
+    Impl. Ransomware Scenario            :         t4, after t3, 4h
+    Impl. Stealth Scan Scenario          :         t5, after t3, 4h
+    Train on New Scenarios               :         t6, after t5, 12h
+    
+    section Phase 3: Deployment
+    Reward Shaping (Surgical)            :         t7, after t6, 2h
+    Active Learning Pipeline Setup       :         t8, after t7, 6h
 ```
+
+### Feature Explanation
+*   **Iterative Fine-Tuning**: A 50-epoch loop where the Observer and Agent train alternately. This synchronizes their latent space representations.
+*   **Ransomware Scenario**: A new attack type where time is critical. Agent receives -100 reward if infection persists > 30s.
+*   **Stealth Scan**: Attacks with low-frequency polling (1 packet/min). Models need longer context windows (LSTMs) to detect this.
+*   **Reward Shaping**: Modifying `reward.py` to penalize `Isolate` actions (-0.9) more than `Block Port` (-0.1), forcing the agent to be precise.
 
 ---
 
-## 7. Operational Commands 💻
+## 6. Access & Commands 💻
 
-### A. Check Status (Current Run)
+### A. Current Status
+Monitor the active training run:
 ```bash
 tail -f training_full_speed.log
 ```
 
-### B. Start Phase 1 (Fine-Tuning)
-*Whan current run finishes:*
+### B. Execute Phase 1 (Fine-Tuning)
+To begin the 50-cycle refinement (Run this after current training finishes):
 ```bash
 python3 train/train_iterative.py --iterations 50
 ```
 
-### C. Evaluate (Visualize)
+### C. Visual Evaluation
+To generate GIFs of the agent's performance:
 ```bash
 python3 eval/animate_eval.py --scenarios all
 ```
