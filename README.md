@@ -56,28 +56,29 @@ How it turns "Raw Logs" into "Understanding" without human labels.
 ```mermaid
 graph TD
     subgraph "Input Layer (Raw Data)"
-        Logs[Syslog Text] -->|Tokenizer| Tokens[Token IDs]
-        Alerts[Snort Alerts] -->|One-Hot| AlertVec[Alert Vector]
-        Telemetry[CPU/RAM %] -->|Normalize| TeleVec[float32 Vector]
+        Logs["Syslog Text"] -->|Tokenizer| Tokens["Token IDs"]
+        Alerts["Snort Alerts"] -->|One-Hot| AlertVec["Alert Vector"]
+        Telemetry["CPU/RAM %"] -->|Normalize| TeleVec["float32 Vector"]
     end
 
     subgraph "Encoder Core (Compression)"
-        Tokens -->|LSTM| TextFeat[Text Features (64D)]
-        AlertVec -->|Dense| AlertFeat[Alert Features (32D)]
-        TeleVec -->|Dense| TeleFeat[Tele Features (32D)]
+        Tokens -->|LSTM| TextFeat["Text Features (64D)"]
+        AlertVec -->|Dense| AlertFeat["Alert Features (32D)"]
+        TeleVec -->|Dense| TeleFeat["Tele Features (32D)"]
         
-        TextFeat & AlertFeat & TeleFeat -->|Concat| Joint[Joint Vector (128D)]
-        Joint -->|Compress| Latent[Latent Space (Bottleneck)]
+        TextFeat & AlertFeat & TeleFeat -->|Concat| Joint["Joint Vector (128D)"]
+        Joint -->|Compress| Latent["Latent Space (Bottleneck)"]
     end
 
     subgraph "Output Heads (Understanding)"
-        Latent -->|Decoder| Recon[Reconstructed Input]
-        Latent -->|Classifier| Risk[Risk Score (0-1)]
-        Latent -->|Projector| State[12D Confidence State]
+        Latent -->|Decoder| Recon["Reconstructed Input"]
+        Latent -->|Classifier| Risk["Risk Score (0-1)"]
+        Latent -->|Projector| State["12D Confidence State"]
     end
 
     style Latent fill:#f9f,stroke:#333,stroke-width:2px
 ```
+
 
 #### 2. The Agent (Decision Brain) 🧠
 How it decides to "Isolate" or "Ignore" using Reinforcement Learning.
