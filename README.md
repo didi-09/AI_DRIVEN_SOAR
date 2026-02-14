@@ -45,7 +45,7 @@ graph TD
 
 ---
 
-## 2. Component Detail: The Observer (Vision) �️
+## 2. Component Detail: The Observer (Vision) 👁️
 
 The Observer's job is **Dimensionality Reduction** and **Anomaly Detection**. It must convert complex, messy logs into a clean signal for the Agent.
 
@@ -152,7 +152,42 @@ graph TD
 
 ---
 
-## 5. Future Roadmap (Timeline to Mastery) �
+## 5. Retrospective: Problems in V1 & V2 ⚠️
+
+Analysis of the first two generations of models revealed several critical engineering flaws that prevented effective scaling:
+
+### A. The "Latent Collapse" Phenomenon
+In V1 and V2, the Observer's output (the 12D vector) became static. Regardless of whether the network was safe or under a DoS attack, the output values stayed at ~0.9.
+*   **Cause**: Sigmoid/Tanh activation functions at the bottleneck caused "Saturation." Gradients became so small that the model stopped learning (Gradient Death).
+
+### B. Fragile Pipeline (Ordinal Mapping)
+V1 used hardcoded indexes (e.g., `telemetry[4]`) to read network metrics. 
+*   **Problem**: Slight changes in the simulator's output order caused the model to read "CPU Usage" as "Packet Count," leading to total perception failure.
+
+### C. Static Training Bias
+V2 trained only on static CSV files (CIC-IDS2017).
+*   **Problem**: The model became an expert at detecting 2017-era attacks but was totally blind to the live dynamics of our current simulator.
+
+---
+
+## 6. Observer Evolution: Fixes & Improvements 🛠️
+
+Following a deep diagnostic phase, the system was upgraded to the current V3 architecture:
+
+| Feature | V1 / V2 (Legacy) | V3 (Current Fixed) |
+| :--- | :--- | :--- |
+| **Latent Activation** | Sigmoid/Tanh (Saturated) | **LayerNorm** (Variance Preserving) |
+| **Telemetry Mapping** | Ordinal Indexing (Brittle) | **Explicit Key Mapping** (Robust) |
+| **Learning Mode** | Static Only (Dataset) | **Active Feedback Loop** (Simulation) |
+| **Model Sensitivity** | < 1% change on attack | **> 120% change** on attack |
+| **Gradient Health** | Vanishing (Collapsed) | **Healthy** (Propagating) |
+
+### Technical Note: Variance Preservation
+By replacing saturating heads with **LayerNorm**, we ensure the 12D latent space acts like a "normalized hypersphere." This allows the Agent to see a distinct, high-contrast "fingerprint" for every state, which is essential for PPO success.
+
+---
+
+## 7. Future Roadmap (Timeline to Mastery) 🚀
 
 This timelines outlines the engineering tasks required to move from "Prototype" to "Production".
 
@@ -188,7 +223,7 @@ gantt
 
 ---
 
-## 6. Access & Commands 💻
+## 8. Access & Commands 💻
 
 ### A. Current Status
 Monitor the active training run:
