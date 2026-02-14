@@ -189,37 +189,36 @@ By replacing saturating heads with **LayerNorm**, we ensure the 12D latent space
 
 ## 7. Future Roadmap (Timeline to Mastery) 🚀
 
-This timelines outlines the engineering tasks required to move from "Prototype" to "Production".
+This timelines outlines the engineering steps to move from our current Autonomous Loop to a Production-Ready Defense Shield.
 
 ### Gantt Chart
 ```mermaid
 gantt
-    title Engineering Roadmap
+    title Engineering Roadmap (V3+)
     dateFormat  X
     axisFormat Day %d
     
-    section Optimization
-    Current Training Run (5M Steps)      :active, t1, 0, 1d
+    section Phase 1: Optimization
+    Active Learning Loop (50 Cycles)     :active, t1, 0, 2d
+    Hyperparameter Evolution (GA)        :         t2, after t1, 1d
     
-    section Phase 1: Tuning
-    Config Optimization (100 Devices)    :done,   t2, 0, 0
-    Iterative Fine-Tuning (50 Cycles)    :         t3, after t1, 1d
+    section Phase 2: Threat Expansion
+    Ransomware Defense Scenarios         :         t3, after t2, 1d
+    APT Stealth Scan Detection           :         t4, after t3, 1d
+    0-Day Exploit Fingerprinting         :         t5, after t4, 2d
     
-    section Phase 2: Features
-    Impl. Ransomware Scenario            :         t4, after t3, 4h
-    Impl. Stealth Scan Scenario          :         t5, after t3, 4h
-    Train on New Scenarios               :         t6, after t5, 12h
-    
-    section Phase 3: Deployment
-    Reward Shaping (Surgical)            :         t7, after t6, 2h
-    Active Learning Pipeline Setup       :         t8, after t7, 6h
+    section Phase 3: Production
+    Explainable AI (XAI) Dashboard       :         t6, after t5, 2d
+    Multi-Agent Coordination (Federated) :         t7, after t6, 3d
+    Hardware-in-the-Loop Integration     :         t8, after t7, 5d
 ```
 
 ### Feature Explanation
-*   **Iterative Fine-Tuning**: A 50-epoch loop where the Observer and Agent train alternately. This synchronizes their latent space representations.
-*   **Ransomware Scenario**: A new attack type where time is critical. Agent receives -100 reward if infection persists > 30s.
-*   **Stealth Scan**: Attacks with low-frequency polling (1 packet/min). Models need longer context windows (LSTMs) to detect this.
-*   **Reward Shaping**: Modifying `reward.py` to penalize `Isolate` actions (-0.9) more than `Block Port` (-0.1), forcing the agent to be precise.
+*   **Active Learning Loop**: [IN PROGRESS] The current 50-cycle iterative training where the Observer and Agent co-evolve using live simulation traces.
+*   **Hyperparameter Evolution**: Using Genetic Algorithms (GA) to auto-tune reward weights and neural architecture parameters.
+*   **APT Stealth Scan**: Detecting slow-and-low scans (1 packet/hour) by increasing the LSTM context window in the Observer.
+*   **Explainable AI (XAI)**: A dashboard that highlights *which* logs or metrics triggered a risk score, allowing human operators to trust the AI's decision.
+*   **Multi-Agent Coordination**: Deploying multiple specialized Agents (one per subnet) that communicate using a central "Command Agent" for enterprise-wide defense.
 
 ---
 
