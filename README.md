@@ -66,6 +66,7 @@ graph TD
         Feat_Text & Feat_Alert & Feat_Metric -->|Concatenate| Integrated["Joint Vector (88D)"]
         Integrated -->|Dense Layer 1| Hidden["Hidden Layer (64D)"]
         Hidden -->|Bottleneck| Latent["Latent State (12D)"]
+        Latent -->|LayerNorm| Latent_Fixed["Fixed Latent Space"]
     end
 
     subgraph "Training Objectives"
@@ -79,7 +80,7 @@ graph TD
     *   **Logs**: Processed via an LSTM (Long Short-Term Memory) network to handle variable-length text.
     *   **Alerts**: Categorical data (IDs) embedded into a vector space.
     *   **Metrics**: Continuous variables normalized to [0,1].
-*   **Latent Space (The Bottleneck)**: The model is forced to compress all this data into just **12 numbers**. This forces it to learn the most important features (e.g., "Is there an attack?") and ignore noise (e.g., "What is the timestamp?").
+*   **Latent Space (The Bottleneck)**: The model is forced to compress all this data into just **12 numbers**. We use **LayerNorm** here instead of saturating activations (Sigmoid/Tanh) to prevent latent collapse and ensure the agent receives a high-variance signal.
 *   **Reconstruction**: During pre-training, it tries to recreate the input. High error means "Unknown Pattern" (Anomaly).
 
 ---
@@ -136,17 +137,18 @@ graph TD
         Agent -->|Updates| Agent_Trained["Specialized Agent"]
     end
 
-    subgraph "Phase 3: Fine-Tuning (Next)"
-        Agent_Trained -->|Generates Traces| New_Data["Agent-Specific Data"]
-        New_Data -->|Retrains| Obs_Final["Specialized Observer"]
+    subgraph "Phase 3: Active Learning (Online)"
+        Agent_Trained -->|Generates Traces| New_Data["cases.ndjson (Live Experience)"]
+        New_Data -->|SimLogAdapter| Loader["Dataset Loader"]
+        Loader -->|Retrains| Obs_Final["Specialized Observer"]
         Obs_Final -->|Refines| Agent_Final["Master Agent"]
     end
 ```
 
 ### Explanation
-1.  **Bootstrapping**: We teach the Observer what "Generic Attacks" look like using a public dataset.
+1.  **Bootstrapping**: We teach the Observer what "Generic Attacks" look like using public datasets (CIC-IDS, BOT-IOT).
 2.  **Specialization**: We freeze the Observer. The Agent plays millions of games in the Simulator to learn strategy.
-3.  **Fine-Tuning**: The Agent's unique strategy creates new traffic patterns. We unfreeze the Observer and train it on *this specific Agent's behavior*, creating a perfectly synchronized team.
+3.  **Active Learning Feedback**: The Agent's unique strategy creates new traffic patterns. We use the `SimLogAdapter` to feed these live traces back into the Observer, creating a synchronized, self-improving security model.
 
 ---
 
