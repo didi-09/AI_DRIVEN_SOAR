@@ -187,7 +187,34 @@ By replacing saturating heads with **LayerNorm**, we ensure the 12D latent space
 
 ---
 
-## 7. Future Roadmap (Timeline to Mastery) 🚀
+## 7. Simulation Scenarios & Curriculum 🎮
+
+The simulator uses **Curriculum Learning** to progressively increase difficulty. The environment scales from 10 devices to 500, introducing 13 complex attack scenarios.
+
+### A. Curriculum Levels
+The system promotes to the next level after achieving a **90% success rate** over the last 100 episodes.
+
+| Level | Name | Devices | Steps | Complexity Focus |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | Bootstrap | 10 | 300 | Simple Scans & Brute Force |
+| **1** | Scaling Up | 50 | 500 | Credential Spraying Campaigns |
+| **2** | Complexity | 100 | 800 | Lateral Movement & Pivot Chains |
+| **3** | Advanced | 300 | 1,500 | Ransomware Bursts & Persistence |
+| **4** | Production | 500 | 2,500 | Full-Scale APT Campaigns |
+
+### B. Featured Attack Scenarios
+The simulator engine implements 13 high-fidelity scenarios, including:
+
+1.  **Low and Slow Recon**: Stealthy port scanning (0.2 intensity) followed by a precise exploit.
+2.  **Pivot Chain**: Lateral movement through compromised DMZ nodes to internal neighbors.
+3.  **Two-Front Attack**: A high-intensity DoS (1.0) used as noise to mask a quiet data exiltration (0.2).
+4.  **Worm Epidemic**: Exponential malware propagation across the network topology.
+5.  **Ransomware Burst**: Rapid, multi-host encryption targeting critical file servers.
+6.  **Insider Misuse**: Authorized credentials used for anomalous data access behavior.
+
+---
+
+## 8. Future Roadmap (Timeline to Mastery) 🚀
 
 This timelines outlines the engineering steps to move from our current Autonomous Loop to a Production-Ready Defense Shield.
 
@@ -222,7 +249,7 @@ gantt
 
 ---
 
-## 8. Access & Commands 💻
+## 9. Access & Commands 💻
 
 ### A. Current Status
 Monitor the active training run:
