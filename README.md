@@ -262,7 +262,6 @@ To begin the refined iterative training (Run this after current training finishe
 ```bash
 python3 train/train_iterative.py --iterations 20 --ppo_steps 100000 --obs_epochs 2
 ```
-
 ---
 
 ## 10. The 12-Dimensional State Representation (The Agent's Vision) 👁️
