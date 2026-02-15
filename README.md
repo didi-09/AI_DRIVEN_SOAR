@@ -40,7 +40,7 @@ graph TD
 ### Explanation
 1.  **The World**: The `Simulator` runs an event-driven loop where attackers target specific devices. This generates logs (Syslog, Snort) identical to a real network.
 2.  **The Perception System (Observer)**: A Multi-Modal Autoencoder reads the logs. It compresses 78 raw features into a **12-Dimensional Latent vector**. This vector represents the "essence" of the network state (e.g., "Under Attack", "Safe", "Confusing").
-3.  **The Decision System (Agent)**: A PPO (Proximal Policy Optimization) model takes the 12D vector. It outputs a discrete action ID (0-35) representing a command (e.g., "Isolate Server 3").
+3.  **The Decision System (Agent)**: A PPO (Proximal Policy Optimization) model takes the 12D vector. These values are **Z-score normalized** (Mean=0, Std=1) to ensure the neural network can process wildly different scales (e.g., CPU % vs Packets).
 4.  **Mitigation**: A deterministic Python script executes the chosen action ID, modifying the network (e.g., changing firewall rules), creating a feedback loop.
 
 ---
@@ -258,13 +258,43 @@ tail -f training_full_speed.log
 ```
 
 ### B. Execute Phase 1 (Fine-Tuning)
-To begin the 50-cycle refinement (Run this after current training finishes):
+To begin the refined iterative training (Run this after current training finishes):
 ```bash
-python3 train/train_iterative.py --iterations 50
+python3 train/train_iterative.py --iterations 20 --ppo_steps 100000 --obs_epochs 2
 ```
 
 ### C. Visual Evaluation
 To generate GIFs of the agent's performance:
-```bash
-python3 eval/animate_eval.py --scenarios all
 ```
+
+---
+
+## 10. The 12-Dimensional State Representation (The Agent's Vision) 👁️
+
+The Agent does not see the raw logs; it sees a **12-Dimensional State Vector** that summarizes the environment.
+
+### Field Specification
+| Index | Field | Description | Range (Normalized) |
+| :--- | :--- | :--- | :--- |
+| **0** | `incident_score` | Risk probability from the Observer | [-1.0, 1.0] |
+| **1** | `incident_confidence` | Model confidence in the risk score | [-1.0, 1.0] |
+| **2** | `severity_level` | Max alert severity (0-3) | [-3.0, 3.0] |
+| **3** | `asset_criticality` | Importance of the target device (1-3) | [-3.0, 3.0] |
+| **4** | `zone_dmz` | 1 if device is in DMZ, else 0 | [Binary] |
+| **5** | `cpu_percent` | CPU utilization of the device | [-3.0, 3.0] |
+| **6** | `mem_percent` | Memory utilization | [-3.0, 3.0] |
+| **7** | `bps_out` | Throughput (Bytes per second) | [-3.0, 3.0] |
+| **8** | `pps_out` | Packet rate (Packets per second) | [-3.0, 3.0] |
+| **9** | `unique_dst_ports` | Port diversity (last 1 min) | [-3.0, 3.0] |
+| **10** | `active_conns` | Number of active network sockets | [-3.0, 3.0] |
+| **11** | `already_isolated` | 1 if mitigation is already active | [Binary] |
+
+### The Normalization Process (Z-Score)
+To prevent network metrics (like 1,000,000 PPS) from overwhelming small signals (like 2% CPU change), we use **Online Z-Score Normalization**:
+
+1.  **Raw Value (x)**: Pulled directly from `simulator/world.py`.
+2.  **Running Mean (μ)**: Tracked per-dimension over the last 10,000 steps.
+3.  **Running Std (σ)**: Tracked to understand volatility.
+4.  **Output (z)**: Calculated as `z = (x - μ) / σ`.
+
+**Why this matters**: This ensures every input to the Agent's brain sits roughly between **-3.0 and +3.0**. The PPO algorithm thrives in this range because gradients remain "in the center" of the neural network's activation functions.
