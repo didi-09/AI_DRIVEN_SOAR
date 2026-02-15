@@ -39,10 +39,10 @@ graph TD
 
 ### Explanation
 1.  **The World**: The `Simulator` runs an event-driven loop where attackers target specific devices. This generates logs (Syslog, Snort) identical to a real network.
-2.  **The Perception System (Observer)**: A Multi-Modal Autoencoder reads the logs. It compresses 78 raw features into a **12-Dimensional Latent vector**. This vector represents the "essence" of the network state (e.g., "Under Attack", "Safe", "Confusing").
-3.  **The Decision System (Agent)**: A PPO (Proximal Policy Optimization) model takes the 12D vector. These values are **Z-score normalized** (Mean=0, Std=1) to ensure the neural network can process wildly different scales (e.g., CPU % vs Packets).
-4.  **Mitigation**: A deterministic Python script executes the chosen action ID, modifying the network (e.g., changing firewall rules), creating a feedback loop.
-
+2.  **The Perception System (Observer V3)**: A Multi-Modal Autoencoder reads the logs. It uses **Log-Scaling** and **Scaled Dot-Product Attention** to convert 78 raw features into a **12-Dimensional Latent vector**.
+3.  **Synchronization Layer**: Unlike older versions, V3 explicitly propagates the `observer_final.pth` into the Agent's environment, ensuring the brain always has its eyes.
+4.  **The Decision System (Agent)**: A PPO model takes the 12D vector. These values are **Z-score normalized** (Mean=0, Std=1) to Sit in the "sweet spot" of the neural network's activation functions.
+5.  **Mitigation**: A deterministic Python script executes the chosen action ID, modifying the network state.
 ---
 
 ## 2. Component Detail: The Observer (Vision) 👁️
@@ -187,6 +187,42 @@ By replacing saturating heads with **LayerNorm**, we ensure the 12D latent space
 
 ---
 
+## 7. Version Comparison: V2 vs V3 (Turbo) 🔄
+
+### Perception Evolution: Visual Comparison
+```mermaid
+graph LR
+    subgraph "V2: Collapsing Perception"
+        I2[Raw Logs] --> L2[LSTM]
+        L2 --> Sig[Sigmoid/Tanh]
+        Sig --> C["Collapsed Output (All 0.9s)"]
+    end
+    subgraph "V3: Stabilized Perception"
+        I3["Log-Scaled Inputs (log1p)"] --> L3[LSTM]
+        L3 --> LN["LayerNorm + SDP Attn"]
+        LN --> H["Healthy High-Variance States"]
+    end
+```
+
+### Control Loop Evolution
+```mermaid
+graph TD
+    subgraph "V2: Blind Training"
+        Stage1_2[Train Obs] --> Save2[Disk]
+        Stage2_2[Train PPO] --- Desync["DESYNC: Agent uses Baseline Obs"]
+    end
+    subgraph "V3: Synchronized Turbo"
+        Stage1_3[Train Obs] --> Propagation["Direct Path Injection"]
+        Propagation --> Stage2_3["Live Sync: Agent uses specialized Obs"]
+    end
+```
+
+### Training Flow Evolution
+*   **V2**: Static Datasets -> Slow Iteration -> Manual Completion.
+*   **V3**: **Pooled Pool (4+ Datasets)** -> **Turbo Binary Caching** -> **Perfection-Driven Early Exit**.
+
+---
+
 ## 7. Simulation Scenarios & Curriculum 🎮
 
 The simulator uses **Curriculum Learning** to progressively increase difficulty. The environment scales from 10 devices to 500, introducing 13 complex attack scenarios.
@@ -242,8 +278,8 @@ gantt
 
 ### Feature Explanation
 *   **Active Learning Loop**: [IN PROGRESS] The current 50-cycle iterative training where the Observer and Agent co-evolve using live simulation traces.
+*   **Numerical Stability (V3 Core)**: Log-Scaling prevents high-throughput bursts (e.g. 10Gbps) from exploding gradients. Scaled Dot-Product Attention prevents Softmax infinity.
 *   **Hyperparameter Evolution**: Using Genetic Algorithms (GA) to auto-tune reward weights and neural architecture parameters.
-*   **APT Stealth Scan**: Detecting slow-and-low scans (1 packet/hour) by increasing the LSTM context window in the Observer.
 *   **Explainable AI (XAI)**: A dashboard that highlights *which* logs or metrics triggered a risk score, allowing human operators to trust the AI's decision.
 *   **Multi-Agent Coordination**: Deploying multiple specialized Agents (one per subnet) that communicate using a central "Command Agent" for enterprise-wide defense.
 
@@ -262,6 +298,11 @@ To begin the refined iterative training (Run this after current training finishe
 ```bash
 python3 train/train_iterative.py --iterations 20 --ppo_steps 100000 --obs_epochs 2
 ```
+
+### C. Visual Evaluation
+To generate GIFs of the agent's performance:
+```
+
 ---
 
 ## 10. The 12-Dimensional State Representation (The Agent's Vision) 👁️
@@ -293,3 +334,28 @@ To prevent network metrics (like 1,000,000 PPS) from overwhelming small signals 
 4.  **Output (z)**: Calculated as `z = (x - μ) / σ`.
 
 **Why this matters**: This ensures every input to the Agent's brain sits roughly between **-3.0 and +3.0**. The PPO algorithm thrives in this range because gradients remain "in the center" of the neural network's activation functions.
+
+---
+
+## 11. Manual Fine-Tuning Guide (Post-Run) 🛠️
+
+Once your 20-iteration "Turbo" run finishes, you can further specialize the models for specific scenarios or "polish" them with lower learning rates.
+
+### A. Fine-Tuning the Observer (Perception)
+If you want to teach the Observer a new, specific attack pattern:
+1.  **Locate Model**: Find the best observer in `logs/iterative_loop/<run_id>/iter_19/models/observer_final.pth`.
+2.  **Move & Link**: Place it in `models/observer/observer_final.pth`.
+3.  **Soft Tuning**: In `train/train_agent.py`, update `CONFIG["lr"] = 1e-5` (10x slower for fine-tuning).
+4.  **Run**: Execute `python3 train/train_agent.py --epochs 2`.
+
+### B. Fine-Tuning the Agent (Strategy)
+To make the agent more cautious or aggressive on a specific network:
+1.  **Locate Model**: Your best agent is at `logs/iterative_loop/<run_id>/ppo_continuous/latest_model.pth`.
+2.  **Update Config**: Overwrite the `latest_model.pth` in your target `log_dir`.
+3.  **Soft Tuning**: In `train/train_ppo.py`, update `CONFIG["lr"] = 1e-5`.
+4.  **Run**: Execute `python3 train/train_ppo.py`. The script will detect the `latest_model.pth` and **automatically resume** from those weights.
+
+### C. Reward Tuning (Psychology)
+You can change the agent's behavior without retraining the neural network by adjusting the Genetic Algorithm parameters in the `outputs/ga_results/best_params.json`:
+*   **Increase `cost_weight`**: Agent becomes "lazy" (avoids taking actions unless absolutely necessary).
+*   **Increase `risk_weight`**: Agent becomes "paranoid" (isolates devices at the slightest hint of trouble).
