@@ -376,7 +376,7 @@ python3 train/train_iterative.py --iterations 20 --ppo_steps 100000 --obs_epochs
 ### C. Visual Evaluation
 To generate GIFs of the agent's performance:
 ```
-
+```
 ---
 
 ## 12. The 12-Dimensional State Representation (The Agent's Vision) 👁️
