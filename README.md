@@ -753,3 +753,285 @@ grep "CRITICAL: NaNs" logs/iterative_loop/{run_id}/iterative_training.log
 
 ---
 
+
+---
+
+## 15. Production Deployment: Input Requirements 📥🔧
+
+> [!IMPORTANT]
+> **For the system to operate in production, it requires specific telemetry formats and log structures. This section defines the exact data inputs needed.**
+
+### Overview
+
+The SOAR system expects **per-device telemetry** collected at regular intervals (default: every 5 seconds). The Observer neural network processes this data to detect anomalies and guide the PPO agent's decisions.
+
+---
+
+### 15.1 Required Telemetry Fields
+
+Each device must provide the following metrics in real-time:
+
+#### Core System Metrics
+
+| Field | Type | Description | Range | Example |
+|-------|------|-------------|-------|---------|
+| `cpu_percent` | float | CPU utilization percentage | 0.0 - 100.0 | 45.2 |
+| `mem_percent` | float | Memory utilization percentage | 0.0 - 100.0 | 62.8 |
+| `load1` | float | 1-minute load average | 0.0 - 16.0 | 2.4 |
+| `shell_user_count` | int | Number of active shell users | 0 - 100 | 2 |
+
+#### Network Metrics
+
+| Field | Type | Description | Range | Example |
+|-------|------|-------------|-------|---------|
+| `tx_bps` | float | Transmit bytes per second | 0 - 10^9 | 1250000.0 |
+| `rx_bps` | float | Receive bytes per second | 0 - 10^9 | 3400000.0 |
+| `active_conns` | int | Active network connections | 0 - 10000 | 47 |
+| `pps_out` | float | Packets per second (outbound) | 0 - 10^6 | 2500.0 |
+| `unique_dst_ports_1m` | int | Unique destination ports in last 1 min | 0 - 65535 | 12 |
+
+#### Security Metrics
+
+| Field | Type | Description | Range | Example |
+|-------|------|-------------|-------|---------|
+| `auth_failures` | int | Authentication failures in window | 0 - 10000 | 3 |
+| `open_ports` | list[int] | Currently open TCP/UDP ports | - | [22, 80, 443] |
+| `service_risk_score` | float | Vulnerability score for services | 0.0 - 1.0 | 0.35 |
+| `web_surface_score` | float | Web-facing attack surface | 0.0 - 1.0 | 0.42 |
+| `outdatedness_score` | float | Software/patch staleness | 0.0 - 1.0 | 0.28 |
+| `default_creds_risk` | float | Likelihood of default credentials | 0.0 - 1.0 | 0.0 |
+
+---
+
+### 15.2 Telemetry JSON Format
+
+**Expected Input Structure** (per device, per time window):
+
+```json
+{
+  "device_id": "dev_0042",
+  "timestamp": "2026-02-16T17:21:00Z",
+  "telemetry": {
+    "cpu_percent": 45.2,
+    "mem_percent": 62.8,
+   "load1": 2.4,
+    "tx_bps": 1250000.0,
+    "rx_bps": 3400000.0,
+    "active_conns": 47,
+    "pps_out": 2500.0,
+    "unique_dst_ports_1m": 12,
+    "auth_failures": 3,
+    "shell_user_count": 2
+  },
+  "security": {
+    "open_ports": [22, 80, 443, 3306],
+    "service_risk_score": 0.35,
+    "web_surface_score": 0.42,
+    "outdatedness_score": 0.28,
+    "default_creds_risk": 0.0
+  },
+  "metadata": {
+    "asset_criticality": 2,
+    "device_type": "web_server",
+    "subnet": "10.0.1.0/24"
+  }
+}
+```
+
+---
+
+### 15.3 Log Format Requirements
+
+The Observer also processes **log entries** for deeper context. Logs should be in syslog-compatible format:
+
+**Supported Log Sources**:
+1. **System Logs**: Authentication, service restarts, crashes
+2. **Firewall Logs**: Blocked connections, rate-limiting triggers
+3. **IDS/IPS Alerts**: Snort, Suricata, Zeek (formatted as Snort-compatible alerts)
+
+**Example Log Entry**:
+```
+2026-02-16T17:21:03Z dev_0042 sshd[12345]: Failed password for root from 192.168.1.50 port 54321 ssh2
+```
+
+**Parsed Fields**:
+- `timestamp`: ISO 8601 format
+- `source`: Device ID or hostname
+- `process`: Service name
+- `pid`: Process ID
+- `message`: Free-form log text (analyzed by Observer's text encoder)
+
+---
+
+### 15.4 Alert Integration (Optional)
+
+For environments with existing IDS/IPS:
+
+**Snort Alert Format**:
+```
+[**] [1:2001219:2] MALWARE-CNC User-Agent known malicious user-agent string [**]
+[Classification: A Network Trojan was detected] [Priority: 1]
+02/16-17:21:05.123456 192.168.1.50:54321 -> 10.0.1.42:80
+TCP TTL:64 TOS:0x0 ID:12345 IpLen:20 DgmLen:60 DF
+```
+
+**Essential Fields**:
+- `alert_id`: Snort signature ID (e.g., `1:2001219:2`)
+- `classification`: Alert category
+- `priority`: 1 (high), 2 (medium), 3 (low)
+- `src_ip`, `dst_ip`, `src_port`, `dst_port`
+- `protocol`: TCP/UDP/ICMP
+
+---
+
+### 15.5 Data Collection Methods
+
+**Option 1: Agent-Based (Recommended)**
+- Deploy lightweight agent on each device
+- Collects telemetry every 5 seconds
+- Sends to central SOAR API endpoint via HTTPS
+
+**Option 2: Agentless (Network Observability)**
+- Use network TAPs or SPAN ports
+- Netflow/sFlow collectors
+- SNMP polling for system metrics
+- **Limitation**: Cannot collect authentication failures or process-level data
+
+**Option 3: Hybrid**
+- Network telemetry from flow collectors
+- Critical security metrics from EDR/XDR agents
+- Firewall logs from SIEM integration
+
+---
+
+### 15.6 Normalization Requirements
+
+> [!CAUTION]
+> **The Observer expects log-scaled network metrics to prevent washout of subtle signals.**
+
+**Pre-Processing Pipeline**:
+```python
+import numpy as np
+
+def normalize_telemetry(raw_telemetry):
+    """Prepare telemetry for Observer input"""
+    normalized = raw_telemetry.copy()
+    
+    # Log-scale network throughput (bytes)
+    normalized['tx_bps'] = np.log1p(raw_telemetry['tx_bps'])
+    normalized['rx_bps'] = np.log1p(raw_telemetry['rx_bps'])
+    
+    # Log-scale packet rates
+    normalized['pps_out'] = np.log1p(raw_telemetry.get('pps_out', 0))
+    
+    # Clip percentages to [0, 100]
+    normalized['cpu_percent'] = np.clip(raw_telemetry['cpu_percent'], 0, 100)
+    normalized['mem_percent'] = np.clip(raw_telemetry['mem_percent'], 0, 100)
+    
+    # Clip connection counts
+    normalized['active_conns'] = np.clip(raw_telemetry['active_conns'], 0, 10000)
+    
+    return normalized
+```
+
+---
+
+### 15.7 Baseline Establishment
+
+The system uses **Online Z-Score Normalization** (see Section 12).
+
+**Cold Start Procedure**:
+1. Collect telemetry for **1000 time windows** (≈83 minutes at 5-sec intervals)
+2. Compute mean (μ) and std (σ) per feature
+3. Save as baseline profile: `baselines/device_{id}_baseline.json`
+4. Observer uses this to detect deviations
+
+**Baseline JSON**:
+```json
+{
+  "device_id": "dev_0042",
+  "baseline_established": "2026-02-16T15:00:00Z",
+  "sample_count": 1000,
+  "statistics": {
+    "cpu_percent": {"mean": 25.4, "std": 8.2},
+    "tx_bps": {"mean": 12.3, "std": 2.1},
+    "active_conns": {"mean": 42, "std": 15}
+  }
+}
+```
+
+---
+
+### 15.8 Compatibility Matrix
+
+| Environment Type | Compatibility | Notes |
+|------------------|---------------|-------|
+| **IoT Devices** | ✅ Native | Trained on IoT telemetry |
+| **Containers** | ✅ Excellent | Metrics via cAdvisor, Prometheus |
+| **VMs** | ✅ Good | Standard hypervisor metrics |
+| **Bare Metal Servers** | ✅ Good | Agent-based collection required |
+| **Cloud Instances** | 🟡 Moderate | May need CloudWatch/Stackdriver adapter |
+| **Network Appliances** | 🟡 Moderate | SNMP + Netflow sufficient if augmented |
+| **Legacy OT/ICS** | 🔴 Limited | Sparse telemetry; requires adaptation |
+
+---
+
+### 15.9 Deployment Checklist
+
+Before deploying the trained Observer + Agent:
+
+- [ ] Telemetry collection infrastructure in place
+- [ ] All required fields populated (see 15.1)
+- [ ] Log aggregation to central repository
+- [ ] Baseline profiles established (1000 samples/device)
+- [ ] Test data pipeline with `eval/curriculum_evaluator.py`
+- [ ] Validate action execution (firewall rules, isolation scripts)
+- [ ] Monitor `observer_manifest.json` for weight sync
+- [ ] Set up alerting for `LatentCollapseError` or NaN detection
+
+---
+
+### 15.10 Example Integration: Prometheus + SOAR
+
+**Prometheus Query** (to fetch telemetry):
+```promql
+# CPU Usage
+100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5s])) * 100)
+
+# Network TX
+rate(node_network_transmit_bytes_total[5s])
+
+# Active Connections
+node_netstat_Tcp_CurrEstab
+```
+
+**SOAR API Endpoint**:
+```bash
+curl -X POST http://soar-api:8080/v1/telemetry \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "web-server-01",
+    "timestamp": "2026-02-16T17:21:00Z",
+    "telemetry": {
+      "cpu_percent": 45.2,
+      "tx_bps": 1250000.0,
+      ...
+    }
+  }'
+```
+
+**Response** (Recommended Action):
+```json
+{
+  "case_id": "case-000042",
+  "risk_score": 0.78,
+  "recommended_action": "isolate_host",
+  "confidence": 0.92,
+  "reasoning": "High risk + lateral movement detected"
+}
+```
+
+---
+
+**Summary**: The system is **production-ready** if telemetry matches the specification in 15.1-15.2. For maximum accuracy, use agent-based collection with all 15 required fields. Hybrid approaches work but may reduce detection fidelity for subtle attacks.
+
