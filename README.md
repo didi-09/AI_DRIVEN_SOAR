@@ -373,10 +373,6 @@ To begin the refined iterative training (Run this after current training finishe
 python3 train/train_iterative.py --iterations 20 --ppo_steps 100000 --obs_epochs 2
 ```
 
-### C. Visual Evaluation
-To generate GIFs of the agent's performance:
-```
-```
 ---
 
 ## 12. The 12-Dimensional State Representation (The Agent's Vision) 👁️
@@ -1034,4 +1030,274 @@ curl -X POST http://soar-api:8080/v1/telemetry \
 ---
 
 **Summary**: The system is **production-ready** if telemetry matches the specification in 15.1-15.2. For maximum accuracy, use agent-based collection with all 15 required fields. Hybrid approaches work but may reduce detection fidelity for subtle attacks.
+
+
+### 15.11 CRITICAL: Complete Observer Input Specification
+
+> [!CAUTION]
+> **The Observer has EXACTLY 3 input channels. All are required for proper operation.**
+
+#### Input Channel 1: Telemetry (32-dimensional vector)
+
+**Priority Fields** (indices 0-5, MUST be present):
+```python
+{
+  "cpu_percent": 45.2,        # Index 0: Normalized to [0, 1]
+  "mem_percent": 62.8,        # Index 1: Normalized to [0, 1]
+  "tx_bps": 1250000.0,        # Index 2: Log-scaled: log1p(val)/10
+  "rx_bps": 3400000.0,        # Index 3: Log-scaled: log1p(val)/10
+  "active_conns": 47,         # Index 4: Log-scaled: log1p(val)/10
+  "unique_dst_ports_1m": 12   # Index 5: Log-scaled: log1p(val)/10
+}
+```
+
+**Optional Fields** (indices 6-31, auto-populated if available):
+- Any additional numeric telemetry (e.g., `pps_out`, `auth_failures`, `load1`)
+- String fields are hashed to [0, 1] range
+- High-variance fields (>1000) are automatically log-scaled
+
+**Python Encoding Example**:
+```python
+import numpy as np
+
+def encode_telemetry(raw_telem):
+    vec = np.zeros(32)
+    
+    # Priority fields (0-5)
+    vec[0] = raw_telem.get("cpu_percent", 0) / 100.0
+    vec[1] = raw_telem.get("mem_percent", 0) / 100.0
+    vec[2] = np.log1p(max(0, raw_telem.get("tx_bps", 0))) / 10.0
+    vec[3] = np.log1p(max(0, raw_telem.get("rx_bps", 0))) / 10.0
+    vec[4] = np.log1p(max(0, raw_telem.get("active_conns", 0))) / 10.0
+    vec[5] = np.log1p(max(0, raw_telem.get("unique_dst_ports_1m", 0))) / 10.0
+    
+    # Optional fields (6-31) - auto-fill from remaining keys
+    idx = 6
+    for key, val in raw_telem.items():
+        if idx >= 32 or key in ["cpu_percent", "mem_percent", "tx_bps", "rx_bps", "active_conns", "unique_dst_ports_1m"]:
+            continue
+        if isinstance(val, (int, float)):
+            vec[idx] = np.log1p(val) / 10.0 if val > 1000 else val
+        idx += 1
+    
+    return vec
+```
+
+---
+
+#### Input Channel 2: Log Entries (up to 50 logs, 32-char each)
+
+**Format**: Raw text log messages (syslog-style or application logs)
+
+**Encoding**:
+- **Max entries**: 50 most recent logs
+- **Max length**: 32 characters per log (truncated)
+- **Vocabulary**: Character-level (256-token ASCII)
+- **Padding**: Shorter sequences are zero-padded
+
+**Supported Log Types**:
+
+**1. Authentication Logs**:
+```
+Failed password for admin from 192.168.1.50 port 22 ssh2
+Accepted publickey for user from 10.0.1.5 port 54321
+```
+
+**2. System Logs**:
+```
+systemd: unit nginx.service entered failed state
+kernel: Out of memory: Kill process 12345 (python)
+```
+
+**3. Firewall Logs**:
+```
+iptables: DROP IN=eth0 SRC=192.168.1.50 DST=10.0.1.42 PROTO=TCP DPT=23
+```
+
+**4. Application Logs**:
+```
+[ERROR] Database connection timeout after 30s
+[WARN] Disk usage 95% on /var/log
+```
+
+**Example Input**:
+```python
+raw_logs = [
+    "Failed password for root from 192.168.1.50",
+    "iptables: DROP SRC=192.168.1.50 DPT=22",
+    "nginx: 404 GET /admin.php - 192.168.1.50"
+]
+```
+
+---
+
+#### Input Channel 3: Alert Entries (up to 100 alerts, 16-char each)
+
+**Format**: IDS/IPS alert signatures or alert messages
+
+**Encoding**:
+- **Max entries**: 100 most recent alerts
+- **Max length**: 16 characters per alert (truncated)
+- **Vocabulary**: Character-level (256-token ASCII)
+- **Padding**: Shorter sequences are zero-padded
+
+**Supported Alert Formats**:
+
+**1. Snort Alerts** (signature field only):
+```
+ET SCAN Potential SSH Scan
+ET DOS Slowloris DoS
+ET MALWARE Trojan Detected
+```
+
+**2. Suricata Alerts** (signature field only):
+```
+MALWARE-CNC Zeus C&C
+SCAN NMAP OS Detection
+EXPLOIT SQL Injection
+```
+
+**3. Custom Alerts** (any text up to 16 chars):
+```
+Port scan
+Brute force
+High CPU
+```
+
+**Example Input**:
+```python
+raw_alerts = [
+    "ET SCAN SSH",
+    "MALWARE-CNC",
+    "Port scan"
+]
+```
+
+---
+
+### 15.12 Complete Python Integration Example
+
+```python
+import numpy as np
+import torch
+from agent.trainable_observer import TrainableObserver
+
+# Load trained Observer
+observer = TrainableObserver()
+observer.load_state_dict(torch.load("models/observer_final.pth"))
+observer.eval()
+
+# Prepare input data for a single device
+input_data = {
+    "raw_telemetry": {
+        "cpu_percent": 85.3,
+        "mem_percent": 72.1,
+        "tx_bps": 4500000.0,
+        "rx_bps": 1200000.0,
+        "active_conns": 142,
+        "unique_dst_ports_1m": 37,
+        # Optional extras
+        "auth_failures": 15,
+        "pps_out": 3200.0
+    },
+    "raw_logs": [
+        "Failed password for admin from 192.168.1.50",
+        "Failed password for root from 192.168.1.50",
+        "iptables: DROP SRC=192.168.1.50 DPT=22"
+    ],
+    "raw_alerts": [
+        "ET SCAN SSH",
+        "Port scan"
+    ]
+}
+
+# Run inference
+with torch.no_grad():
+    output = observer([input_data])  # Pass as list for single sample
+
+# Extract results
+features = output['features']       # (1, 12) - Latent representation
+risk_pred = output['risk_pred']     # (1,) - Risk score [0, 1]
+return_pred = output['return_pred'] # (1,) - Expected return
+
+print(f"Risk Score: {risk_pred.item():.3f}")
+print(f"Features: {features.squeeze().numpy()}")
+```
+
+---
+
+### 15.13 Minimal vs Full Telemetry
+
+**Absolute Minimum** (Observer will still function):
+```json
+{
+  "cpu_percent": 45.2,
+  "mem_percent": 62.8,
+  "tx_bps": 1250000.0,
+  "rx_bps": 3400000.0,
+  "active_conns": 47,
+  "unique_dst_ports_1m": 12
+}
+```
+
+**Recommended** (for best accuracy):
+```json
+{
+  "cpu_percent": 45.2,
+  "mem_percent": 62.8,
+  "tx_bps": 1250000.0,
+  "rx_bps": 3400000.0,
+  "active_conns": 47,
+  "unique_dst_ports_1m": 12,
+  "auth_failures": 3,
+  "pps_out": 2500.0,
+  "load1": 2.4,
+  "conns_established": 42
+}
+```
+
+**Maximum** (Section 15.1 full spec):
+- All 15 fields from 15.1 provide maximum detection fidelity
+- Observer automatically uses first 6 as priority, remaining fill slots 6-31
+
+---
+
+### 15.14 Data Validation Script
+
+```python
+def validate_observer_input(data):
+    """Validate input data for Observer"""
+    errors = []
+    
+    # Check telemetry
+    telem = data.get("raw_telemetry", {})
+    required = ["cpu_percent", "mem_percent", "tx_bps", "rx_bps", "active_conns", "unique_dst_ports_1m"]
+    
+    for field in required:
+        if field not in telem:
+            errors.append(f"Missing required telemetry field: {field}")
+        elif not isinstance(telem[field], (int, float)):
+            errors.append(f"Invalid type for {field}: expected numeric, got {type(telem[field])}")
+    
+    # Check logs
+    logs = data.get("raw_logs", [])
+    if len(logs) > 50:
+        errors.append(f"Too many logs: {len(logs)} (max 50)")
+    
+    # Check alerts
+    alerts = data.get("raw_alerts", [])
+    if len(alerts) > 100:
+        errors.append(f"Too many alerts: {len(alerts)} (max 100)")
+    
+    return len(errors) == 0, errors
+
+# Usage
+is_valid, errors = validate_observer_input(input_data)
+if not is_valid:
+    print("Validation errors:", errors)
+```
+
+---
+
+**Summary**: The Observer requires **THREE inputs** per device: (1) 6 core telemetry fields (+ optional extras), (2) up to 50 log entries, (3) up to 100 alert entries. All three channels are processed concurrently and fused into a 12-dimensional latent representation that the PPO agent uses for decision-making.
 
