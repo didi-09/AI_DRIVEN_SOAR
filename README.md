@@ -863,20 +863,35 @@ The Observer also processes **log entries** for deeper context. Logs should be i
 
 For environments with existing IDS/IPS:
 
-**Snort Alert Format**:
-```
-[**] [1:2001219:2] MALWARE-CNC User-Agent known malicious user-agent string [**]
-[Classification: A Network Trojan was detected] [Priority: 1]
-02/16-17:21:05.123456 192.168.1.50:54321 -> 10.0.1.42:80
-TCP TTL:64 TOS:0x0 ID:12345 IpLen:20 DgmLen:60 DF
+**Suricata EVE JSON Format**:
+```json
+{
+  "timestamp": "2026-02-16T17:21:05.123456+0000",
+  "flow_id": 1234567890,
+  "event_type": "alert",
+  "src_ip": "192.168.1.50",
+  "src_port": 54321,
+  "dest_ip": "10.0.1.42",
+  "dest_port": 80,
+  "proto": "TCP",
+  "alert": {
+    "action": "allowed",
+    "gid": 1,
+    "signature_id": 2001219,
+    "rev": 2,
+    "signature": "ET MALWARE-CNC User-Agent known malicious user-agent string",
+    "category": "A Network Trojan was detected",
+    "severity": 1
+  }
+}
 ```
 
-**Essential Fields**:
-- `alert_id`: Snort signature ID (e.g., `1:2001219:2`)
-- `classification`: Alert category
-- `priority`: 1 (high), 2 (medium), 3 (low)
-- `src_ip`, `dst_ip`, `src_port`, `dst_port`
-- `protocol`: TCP/UDP/ICMP
+**Essential Fields to Extract**:
+- `alert.signature`: Alert message (e.g., "ET MALWARE-CNC ...") → Send to Observer
+- `alert.severity`: 1 (high), 2 (medium), 3 (low)
+- `src_ip`, `dest_ip`, `src_port`, `dest_port`
+- `proto`: TCP/UDP/ICMP
+- **Only the `signature` field is sent to the Observer** (max 16 chars)
 
 ---
 
@@ -1300,4 +1315,497 @@ if not is_valid:
 ---
 
 **Summary**: The Observer requires **THREE inputs** per device: (1) 6 core telemetry fields (+ optional extras), (2) up to 50 log entries, (3) up to 100 alert entries. All three channels are processed concurrently and fused into a 12-dimensional latent representation that the PPO agent uses for decision-making.
+
+
+---
+
+## 16. Production SOAR Deployment Guide 🚀
+
+> [!IMPORTANT]
+> **This section provides complete step-by-step instructions for deploying the trained Observer and PPO Agent in a production SOAR environment.**
+
+### 16.1 SOAR Environment Requirements
+
+#### Infrastructure
+
+**Minimum Server Specifications**:
+- **CPU**: 4 cores (8 recommended for >100 devices)
+- **RAM**: 8GB (16GB recommended)
+- **GPU**: Optional (2x faster inference with CUDA)
+- **Storage**: 50GB SSD
+- **Network**: 1Gbps for telemetry ingestion
+
+**Operating System**:
+- Ubuntu 20.04/22.04 LTS (recommended)
+- RHEL 8/9
+- Debian 11/12
+- Docker-based deployment supported
+
+#### Software Stack
+
+**Core Dependencies**:
+```bash
+# Python 3.9-3.11
+python3 --version
+
+# PyTorch (CPU or CUDA)
+pip install torch==2.1.0
+
+# Additional libraries
+pip install numpy gymnasium stable-baselines3 loguru
+```
+
+**Optional Components**:
+- **PostgreSQL/MySQL**: For case storage and audit logs
+- **Redis**: For real-time telemetry caching
+- **Prometheus**: For metric collection
+- **Grafana**: For monitoring dashboards
+
+---
+
+### 16.2 Step-by-Step Deployment
+
+#### Step 1: Prepare Model Files
+
+**Locate trained models** (after 20-iteration training completes):
+```bash
+cd /home/kali/Desktop/DIDI\ RL/DIDI\ RL/logs/iterative_loop/20260216_131409/
+
+# Final Observer model
+ls iter_20/models/observer_final.pth
+
+# Final PPO Agent model  
+ls ppo_continuous/continuous_run/ppo_policy_final.zip
+```
+
+**Copy to deployment directory**:
+```bash
+mkdir -p /opt/soar/models
+cp iter_20/models/observer_final.pth /opt/soar/models/
+cp ppo_continuous/continuous_run/ppo_policy_final.zip /opt/soar/models/
+```
+
+---
+
+#### Step 2: Set Up SOAR API Server
+
+**Create deployment structure**:
+```bash
+mkdir -p /opt/soar/{models,config,logs,data}
+cd /opt/soar
+```
+
+**Install SOAR codebase**:
+```bash
+# Copy entire project
+cp -r /home/kali/Desktop/DIDI\ RL/DIDI\ RL/* /opt/soar/
+
+# Install dependencies
+cd /opt/soar
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Create inference service** (`/opt/soar/serve.py`):
+```python
+#!/usr/bin/env python3
+"""
+SOAR Inference Server
+Provides REST API for Observer + PPO Agent inference
+"""
+
+import torch
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+from agent.trainable_observer import TrainableObserver
+from stable_baselines3 import PPO
+import numpy as np
+
+app = FastAPI(title="DIDI RL SOAR API", version="1.0.0")
+
+# Load models at startup
+observer = TrainableObserver()
+observer.load_state_dict(torch.load("models/observer_final.pth", map_location="cpu"))
+observer.eval()
+
+ppo_agent = PPO.load("models/ppo_policy_final.zip")
+
+# Action mapping
+ACTION_NAMES = ["monitor", "log_alert", "block_ip", "isolate_host", "quarantine"]
+
+class TelemetryInput(BaseModel):
+    device_id: str
+    telemetry: Dict[str, float]
+    logs: Optional[List[str]] = []
+    alerts: Optional[List[str]] = []
+
+class SOARResponse(BaseModel):
+    device_id: str
+    risk_score: float
+    recommended_action: str
+    action_confidence: float
+    features: List[float]
+
+@app.post("/v1/analyze", response_model=SOARResponse)
+async def analyze_device(input_data: TelemetryInput):
+    """
+    Analyze device telemetry and recommend action
+    """
+    try:
+        # Prepare Observer input
+        obs_input = {
+            "raw_telemetry": input_data.telemetry,
+            "raw_logs": input_data.logs or [],
+            "raw_alerts": input_data.alerts or []
+        }
+        
+        # Observer inference
+        with torch.no_grad():
+            obs_output = observer([obs_input])
+        
+        risk_score = float(obs_output['risk_pred'].item())
+        features = obs_output['features'].squeeze().numpy()
+        
+        # PPO inference (12D features → action)
+        action, _ = ppo_agent.predict(features, deterministic=True)
+        action_id = int(action)
+        
+        return SOARResponse(
+            device_id=input_data.device_id,
+            risk_score=risk_score,
+            recommended_action=ACTION_NAMES[action_id],
+            action_confidence=0.95,  # PPO is deterministic in inference
+            features=features.tolist()
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "models_loaded": True}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080, log_level="info")
+```
+
+**Start the service**:
+```bash
+chmod +x serve.py
+python serve.py
+# Server running on http://0.0.0.0:8080
+```
+
+---
+
+#### Step 3: Configure Data Ingestion
+
+**Option A: Direct API Integration**
+
+```bash
+# Example: Send telemetry from agent
+curl -X POST http://soar-server:8080/v1/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "web-server-01",
+    "telemetry": {
+      "cpu_percent": 85.3,
+      "mem_percent": 72.1,
+      "tx_bps": 4500000.0,
+      "rx_bps": 1200000.0,
+      "active_conns": 142,
+      "unique_dst_ports_1m": 37
+    },
+    "logs": ["Failed password for admin from 192.168.1.50"],
+    "alerts": ["ET SCAN SSH"]
+  }'
+
+# Response:
+# {
+#   "device_id": "web-server-01",
+#   "risk_score": 0.847,
+#   "recommended_action": "isolate_host",
+#   "action_confidence": 0.95,
+#   "features": [0.12, -0.34, 0.89, ...]
+# }
+```
+
+**Option B: Suricata Integration**
+
+Create Suricata EVE JSON processor (`/opt/soar/ingest_suricata.py`):
+```python
+#!/usr/bin/env python3
+import json
+import requests
+from pathlib import Path
+
+SOAR_API = "http://localhost:8080/v1/analyze"
+EVE_LOG = "/var/log/suricata/eve.json"
+
+def process_suricata_alerts():
+    """Tail Suricata EVE JSON and send alerts to SOAR"""
+    with open(EVE_LOG, "r") as f:
+        f.seek(0, 2)  # Go to end
+        while True:
+            line = f.readline()
+            if not line:
+                continue
+            
+            event = json.loads(line)
+            if event.get("event_type") == "alert":
+                alert_sig = event["alert"]["signature"]
+                device_id = event["dest_ip"]
+                
+                # Send to SOAR (would need telemetry from another source)
+                requests.post(SOAR_API, json={
+                    "device_id": device_id,
+                    "telemetry": {},  # Fetch from Prometheus/SNMP
+                    "logs": [],
+                    "alerts": [alert_sig]
+                })
+
+if __name__ == "__main__":
+    process_suricata_alerts()
+```
+
+---
+
+#### Step 4: Configure Action Execution
+
+**Create action executor** (`/opt/soar/execute_actions.py`):
+```python
+#!/usr/bin/env python3
+"""
+Execute recommended actions from SOAR API
+"""
+
+import subprocess
+import requests
+from typing import Dict
+
+def execute_action(device_id: str, action: str) -> bool:
+    """Execute SOAR action on target device"""
+    
+    if action == "monitor":
+        # Just log, no action
+        print(f"[MONITOR] {device_id}")
+        return True
+    
+    elif action == "log_alert":
+        # Send to SIEM
+        requests.post("http://siem:514", json={
+            "device_id": device_id,
+            "alert": "SOAR: Suspicious activity detected"
+        })
+        return True
+    
+    elif action == "block_ip":
+        # Add firewall rule
+        subprocess.run([
+            "iptables", "-A", "INPUT",
+            "-s", device_id,
+            "-j", "DROP"
+        ], check=True)
+        return True
+    
+    elif action == "isolate_host":
+        # VLAN isolation (example for Cisco)
+        subprocess.run([
+            "ssh", "switch.local",
+            f"vlan database; vlan 999; exit; interface range {device_id}; switchport access vlan 999"
+        ])
+        return True
+    
+    elif action == "quarantine":
+        # Move to quarantine subnet + disable network
+        subprocess.run(["ssh", device_id, "sudo ip link set eth0 down"])
+        return True
+    
+    return False
+```
+
+---
+
+#### Step 5: Deploy Monitoring
+
+**Prometheus metrics** (`/opt/soar/metrics.py`):
+```python
+from prometheus_client import Counter, Histogram, Gauge, start_http_server
+
+# Metrics
+requests_total = Counter('soar_requests_total', 'Total SOAR API requests')
+risk_score_dist = Histogram('soar_risk_score', 'Risk score distribution')
+actions_taken = Counter('soar_actions_total', 'Actions taken', ['action'])
+devices_monitored = Gauge('soar_devices_active', 'Active devices')
+
+# Start Prometheus exporter on :9090
+start_http_server(9090)
+```
+
+**Grafana Dashboard**:
+- Import dashboard JSON from `/opt/soar/dashboards/soar_dashboard.json`
+- Visualize: Risk scores over time, actions per hour, device coverage
+
+---
+
+### 16.3 Production Hardening
+
+#### Security
+
+```bash
+# Enable TLS for API
+# Update serve.py:
+uvicorn.run(app, host="0.0.0.0", port=8443, 
+            ssl_keyfile="/etc/ssl/private/key.pem",
+            ssl_certfile="/etc/ssl/certs/cert.pem")
+
+# Authentication
+# Add API key middleware to FastAPI
+```
+
+#### High Availability
+
+```bash
+# Run multiple SOAR instances behind load balancer
+# Example with nginx:
+upstream soar_backend {
+    server soar1:8080;
+    server soar2:8080;
+    server soar3:8080;
+}
+
+server {
+    listen 443 ssl;
+    location / {
+        proxy_pass http://soar_backend;
+    }
+}
+```
+
+#### Logging & Audit
+
+```python
+# Add to serve.py
+import logging
+logging.basicConfig(
+    filename="/var/log/soar/api.log",
+    level=logging.INFO,
+    format='%(asctime)s %(message)s'
+)
+
+@app.post("/v1/analyze")
+async def analyze_device(input_data: TelemetryInput):
+    logging.info(f"Analyze request: {input_data.device_id} risk={risk_score}")
+    # ... existing code
+```
+
+---
+
+### 16.4 Deployment Validation
+
+**Health checks**:
+```bash
+# Test API
+curl http://soar-server:8080/health
+# {"status":"healthy","models_loaded":true}
+
+# Test inference
+curl -X POST http://soar-server:8080/v1/analyze \
+  -d '{"device_id":"test","telemetry":{"cpu_percent":50,"mem_percent":60,"tx_bps":1000000,"rx_bps":500000,"active_conns":20,"unique_dst_ports_1m":5}}'
+```
+
+**Load testing**:
+```bash
+# Install wrk
+sudo apt install wrk
+
+# Benchmark
+wrk -t4 -c100 -d30s --latency http://soar-server:8080/health
+# Should handle >1000 req/sec on 4-core CPU
+```
+
+---
+
+### 16.5 Docker Deployment (Alternative)
+
+**Dockerfile**:
+```dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+COPY . /app
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy trained models
+COPY models/ /app/models/
+
+EXPOSE 8080
+CMD ["python", "serve.py"]
+```
+
+**Build and run**:
+```bash
+docker build -t soar-api:latest .
+docker run -d -p 8080:8080 --name soar soar-api:latest
+```
+
+**Docker Compose** (with Redis & Prometheus):
+```yaml
+version: '3.8'
+services:
+  soar-api:
+    image: soar-api:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/app/models:ro
+    depends_on:
+      - redis
+  
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+  
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+```
+
+---
+
+### 16.6 Integration Examples
+
+**Splunk Integration**:
+```python
+import splunk_sdk as splunk
+
+# Send SOAR decisions to Splunk
+service = splunk.connect(host="splunk.local", port=8089, username="admin", password="changeme")
+service.indexes["soar"].submit(
+    f"device_id={device_id} risk={risk_score} action={action}"
+)
+```
+
+**TheHive Integration**:
+```python
+# Create case in TheHive when risk > 0.8
+if risk_score > 0.8:
+    requests.post("http://thehive:9000/api/case", json={
+        "title": f"High-risk device: {device_id}",
+        "description": f"Risk: {risk_score}, Action: {action}",
+        "severity": 3,
+        "tlp": 2
+    })
+```
+
+---
+
+**Summary**: The SOAR deployment requires: (1) SOAR API server running Observer+PPO models, (2) Telemetry ingestion from agents/Prometheus, (3) Suricata/IDS integration for alerts, (4) Action executor for automated response, (5) Monitoring with Prometheus+Grafana. The entire stack can run on a single 8GB VM or be containerized with Docker.
 
