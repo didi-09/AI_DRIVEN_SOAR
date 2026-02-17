@@ -211,7 +211,7 @@ graph LR
     subgraph "V3: Stabilized Perception"
         I3["Log-Scaled Inputs (log1p)"] --> L3[LSTM]
         L3 --> LN["LayerNorm + SDP Attn"]
-        LN --> H["Healthy High-Variance States"]
+        LN --> H["Healthy High-Variance States (Class Sep: 0.64)"]
     end
 ```
 
@@ -226,15 +226,80 @@ graph TD
         Stage1_3[Train Obs] --> Propagation["Direct Path Injection"]
         Propagation --> Stage2_3["Live Sync: Agent uses specialized Obs"]
     end
+    subgraph "V4: Hyper-Vectorized (Current)"
+        Stage1_4[Train Obs] --> Shared["Shared Memory Curtain"] 
+        Shared --> Workers["16x Parallel Worker Loops"]
+        Workers -->|Async Rollouts| PPO["Central Learner (512 Units)"]
+        PPO -->|Global Update| Workers
+    end
 ```
-
-### Training Flow Evolution
-*   **V2**: Static Datasets -> Slow Iteration -> Manual Completion.
-*   **V3**: **Pooled Pool (4+ Datasets)** -> **Turbo Binary Caching** -> **Perfection-Driven Early Exit**.
 
 ---
 
-## 7. Simulation Scenarios & Curriculum 🎮
+## 8. Proof of Performance (V3 Evaluation Results) 📊
+
+**Date:** 2026-02-17 13:40:36
+**Status:** Partial Success (Good Eyes, Blind Brain)
+
+The V3 evaluation revealed a critical insight: The **Perception System (Observer)** is working perfectly, but the **Agent's Training Pipeline** had a data ingestion bug.
+
+### A. Observer Health: EXCELLENT ✅
+The Observer is generating distinct, high-variance representations for different network states.
+- **Class Separation**: **0.6463** (High score indicating clear distinction between Attack and Benign)
+- **Collapsed Dims**: **0** (All 12 dimensions are active)
+- **NaN/Inf**: 0 (Numerical stability confirmed)
+
+### B. Agent Performance: COLLAPSED ⚠️
+The Agent collapsed to a single "Safety Action" (Action 332: Rotate Credentials) because it was not receiving the Alert signals during training (due to a key mismatch bug `alerts` vs `suricata_alerts`).
+- **Action Repetition**: **95.00%** (Repeated same action)
+- **Policy Entropy**: Near Zero.
+
+**Conclusion**: The "Body" and "Eyes" are healthy. The "Brain" needs to be retrained with the correct data stream. This leads to the V4 Architecture.
+
+---
+
+## 9. V4 Architecture: Hyper-Boost & Deep Brain 🚀
+
+To solve the V3 issues and achieve production-grade performance, we introduced the **V4 "Hyper Boost" Architecture**.
+
+### Key Innovations
+
+1.  **Vectorized Parallel Training (The Speedup)**
+    *   **Old (V3)**: Single linear simulation (1 step / CPU cycle).
+    *   **New (V4)**: **16x Parallel Environments** (`AsyncVectorEnv`).
+    *   **Mechanism**: We use `multiprocessing` to spawn independent gym environments. A shared `ctypes` integer synchronizes the Curriculum Level across all workers.
+    *   **Constraint**: Observers in worker threads are forced to **CPU** to prevent GPU VRAM explosion (OOM).
+
+2.  **Deep Brain Architecture (The Capacity)**
+    *   **Old (V3)**: 256 Hidden Units.
+    *   **New (V4)**: **512 Hidden Units** + Extra Layer.
+    *   **Why**: To map the complex, high-variance 12D signals effectively, the agent needed more cognitive capacity.
+
+3.  **Orthogonal Initialization (The Stability)**
+    *   **Old (V3)**: Standard PyTorch init.
+    *   **New (V4)**: `orthogonal_init` with calculated gains ($\sqrt{2}$ for ReLU).
+    *   **Effect**: Ensures gradients flow through the deep network without vanishing or exploding at the start of training.
+
+### V4 Architecture Diagram
+```mermaid
+graph TD
+    subgraph "Main Process (GPU)"
+        Learner["PPO Learner"]
+        Mem["Replay Buffer (Batch: 16384)"]
+        Curriculum["Curriculum Controller"]
+    end
+
+    subgraph "Worker Pool (CPU)"
+        W1["Env 1"]
+        W2["Env 2"]
+        W3["Env ..."]
+        W16["Env 16"]
+    end
+    
+    W1 & W2 & W3 & W16 -->|States (n=16)| Mem
+    Learner -->|Policy Update| W1 & W2 & W3 & W16
+    Curriculum -->|Shared Level| W1 & W2 & W3 & W16
+```
 
 The simulator uses **Curriculum Learning** to progressively increase difficulty. The environment scales from 10 devices to 500, introducing 13 complex attack scenarios.
 
