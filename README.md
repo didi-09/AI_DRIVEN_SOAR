@@ -312,9 +312,20 @@ graph TD
         W16["Env 16"]
     end
     
-    W1 & W2 & W3 & W16 -->|States (n=16)| Mem
-    Learner -->|Policy Update| W1 & W2 & W3 & W16
-    Curriculum -->|Shared Level| W1 & W2 & W3 & W16
+    W1 --> Mem
+    W2 --> Mem
+    W3 --> Mem
+    W16 --> Mem
+    
+    Learner --> W1
+    Learner --> W2
+    Learner --> W3
+    Learner --> W16
+    
+    Curriculum -->|Shared Level| W1
+    Curriculum --> W2
+    Curriculum --> W3
+    Curriculum --> W16
 ```
 
 The simulator uses **Curriculum Learning** to progressively increase difficulty. The environment scales from 10 devices to 500, introducing 13 complex attack scenarios.
