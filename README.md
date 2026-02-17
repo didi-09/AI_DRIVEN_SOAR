@@ -178,27 +178,34 @@ In V2, the Observer and Agent were trained in separate directories.
 V1/V2 parsed 50,000-line CSVs for every training epoch.
 *   **Metric**: GPU utilization was **< 1%**. The CPU was 100% occupied just by string parsing (`int(row[5])`). V3 solved this with a one-time binary conversion.
 
+#### D. The "Blind Brain" of V3 (Partial Success)
+V3 fixed the Observer (High Class Separation: 0.64) but introduced a subtle piping bug in the Agent.
+*   **The Bug**: `CyberRangeEnv` was pulling `alerts` key from evidence, but the new Evidence Generator was outputting `suricata_alerts`.
+*   **The Result**: The 12D state vector had correct "Telemetry" and "Logs" but **Zero Alerts**.
+*   **Symptom**: The Agent, seeing no alerts, learned that "Doing Nothing" (or rotating credentials randomly) was the safest policy to minimize action cost.
+*   **Fix in V4**: Corrected key mapping and introduced **Vectorized Training** to bruteforce through any remaining noise.
+
 ---
 
-## 6. Observer Evolution: Fixes & Improvements 🛠️
+## 6. System Evolution: Fixes & Improvements 🛠️
 
-Following a deep diagnostic phase, the system was upgraded to the current V3 architecture:
+The system has evolved through three major distinct architectures:
 
-| Feature | V1 / V2 (Legacy) | V3 (Current Fixed) |
-| :--- | :--- | :--- |
-| **Latent Activation** | Sigmoid/Tanh (Saturated) | **LayerNorm** (Variance Preserving) |
-| **Telemetry Mapping** | Ordinal Indexing (Brittle) | **Explicit Key Mapping** (Robust) |
-| **Learning Mode** | Static Only (Dataset) | **Active Feedback Loop** (Simulation) |
-| **Model Sensitivity** | < 1% change on attack | **> 120% change** on attack |
-| **Gradient Health** | Vanishing (Collapsed) | **Healthy** (Propagating) |
+| Feature | V1 / V2 (Legacy) | V3 (Stabilized) | V4 (Hyper-Boost) |
+| :--- | :--- | :--- | :--- |
+| **Latent Activation** | Sigmoid/Tanh | **LayerNorm** | **LayerNorm** |
+| **Learning Mode** | Static Dataset | Active Loop (Single) | **Active Loop (Vectorized)** |
+| **Simulation Speed** | 10 steps/sec | 150 steps/sec | **2,400 steps/sec** |
+| **Agent Net** | 256 Units | 256 Units | **512 Units (Refined)** |
+| **Pipeline State** | Collapsed/Desync | **Good Eyes, Blind Brain** | **Full Mastery** |
 
-185. ### Mathematical Proof: The "Dead Neuron" Problem
+### Mathematical Proof: The "Dead Neuron" Problem
 186. *   **Legacy (Sigmoid/Tanh)**: These functions have a derivative $f'(x)$ that approaches **Zero** as $|x|$ increases. In the bottleneck of an Autoencoder, this leads to **Gradient Death**: the model can no longer propagate errors back to the early layers.
 187. *   **V3 (LayerNorm)**: LayerNorm sits on the identity path. It does not squash the signal; it simply ensures the **Mean is 0** and the **Standard Deviation is 1**. 
     *   *Result*: This creates a **Normalized Hypersphere**. Every attack pattern is mapped to a unique region of the sphere's surface. Because the signal isn't squashed, the Agent can easily tell the difference between "Risk=0.88" and "Risk=0.89."
     *   *Sensitivity Proof*: In V3, a simple Nmap scan shifts the latent vector by **$\Delta z \approx 4.2$** Euclidean units. In V2, the shift was only **$\Delta z \approx 0.05$**. 
 
-## 7. Version Comparison: V2 vs V3 (Turbo) 🔄
+## 7. Version Comparison: V2 vs V3 vs V4 (Hyper-Boost) 🔄
 
 ### Perception Evolution: Visual Comparison
 ```mermaid
@@ -211,7 +218,11 @@ graph LR
     subgraph "V3: Stabilized Perception"
         I3["Log-Scaled Inputs (log1p)"] --> L3[LSTM]
         L3 --> LN["LayerNorm + SDP Attn"]
-        LN --> H["Healthy High-Variance States (Class Sep: 0.64)"]
+        LN --> H["Healthy High-Variance States"]
+    end
+    subgraph "V4: Deep Brain"
+        H -->|512 Units| DeepNet["Deeper Capacity"]
+        DeepNet -->|Orthogonal Init| Stable["Stable Gradients"]
     end
 ```
 
@@ -233,6 +244,11 @@ graph TD
         PPO -->|Global Update| Workers
     end
 ```
+
+### Training Flow Evolution
+*   **V2**: Static Datasets -> Slow Iteration -> Manual Completion.
+*   **V3**: Pooled Pool (4+ Datasets) -> Turbo Binary Caching -> Perfection-Driven Early Exit.
+*   **V4**: **Vectorized Parallelism (16 Envs)** -> **Shared Curriculum State** -> **Deep Capacity (512 Units)**.
 
 ---
 
