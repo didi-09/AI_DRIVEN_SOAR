@@ -191,13 +191,14 @@ V3 fixed the Observer (High Class Separation: 0.64) but introduced a subtle pipi
 
 The system has evolved through three major distinct architectures:
 
-| Feature | V1 / V2 (Legacy) | V3 (Stabilized) | V4 (Hyper-Boost) |
+| Feature | V3 (Stabilized) | V4 (Hyper-Boost) | V5 (Reliable Optuna) |
 | :--- | :--- | :--- | :--- |
-| **Latent Activation** | Sigmoid/Tanh | **LayerNorm** | **LayerNorm** |
-| **Learning Mode** | Static Dataset | Active Loop (Single) | **Active Loop (Vectorized)** |
-| **Simulation Speed** | 10 steps/sec | 150 steps/sec | **2,400 steps/sec** |
-| **Agent Net** | 256 Units | 256 Units | **512 Units (Refined)** |
-| **Pipeline State** | Collapsed/Desync | **Good Eyes, Blind Brain** | **Full Mastery** |
+| **Latent Activation** | **LayerNorm** | **LayerNorm** | **LayerNorm** |
+| **Learning Mode** | Active Loop (Single) | **Active Loop (Vectorized)** | **Distributed Global Tuning** |
+| **Simulation Speed** | 150 steps/sec | **2,400 steps/sec** | **2,400 steps/sec (Stable)** |
+| **Reward Tuning** | Manual / Static | Manual / Static | **Optuna TPE (Dynamic)** |
+| **Worker Backend** | Single Process | Multiprocessing (Fork) | **Spawn (CUDA Safe)** |
+| **Pipeline State** | **Good Eyes, Blind Brain** | **Full Mastery** | **Industrial Stability** |
 
 ### Mathematical Proof: The "Dead Neuron" Problem
 186. *   **Legacy (Sigmoid/Tanh)**: These functions have a derivative $f'(x)$ that approaches **Zero** as $|x|$ increases. In the bottleneck of an Autoencoder, this leads to **Gradient Death**: the model can no longer propagate errors back to the early layers.
@@ -237,11 +238,16 @@ graph TD
         Stage1_3[Train Obs] --> Propagation["Direct Path Injection"]
         Propagation --> Stage2_3["Live Sync: Agent uses specialized Obs"]
     end
-    subgraph "V4: Hyper-Vectorized (Current)"
+    subgraph "V4: Hyper-Vectorized"
         Stage1_4[Train Obs] --> Shared["Shared Memory Curtain"] 
-        Shared --> Workers["16x Parallel Worker Loops"]
-        Workers -->|Async Rollouts| PPO["Central Learner (512 Units)"]
-        PPO -->|Global Update| Workers
+        Shared --> Workers4["16x Parallel Worker Loops"]
+        Workers4 -->|Async Rollouts| PPO4["Central Learner (512 Units)"]
+    end
+    subgraph "V5: Distributed Global Tuning (Current)"
+        Study["SQLite Study (optuna_rewards.db)"] -->|Ask Params| Workers5["Spawned Workers (Safe CUDA)"]
+        Workers5 -->|Tell Rewards| Study
+        Study -->|TPE Sampler| Optimizer["Global Reward Optimizer"]
+        Workers5 -->|Step Data| PPO5["Central Learner (512 Units)"]
     end
 ```
 
@@ -464,7 +470,6 @@ To begin the refined iterative training (Run this after current training finishe
 ```bash
 python3 train/train_iterative.py --iterations 20 --ppo_steps 100000 --obs_epochs 2
 ```
-
 ---
 
 ## 12. The 12-Dimensional State Representation (The Agent's Vision) 👁️
@@ -2310,3 +2315,79 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+
+---
+
+## 17. Reliability & Optuna Optimization (Global Tuning) 🎯🛡️
+
+> [!IMPORTANT]
+> **V5 addresses the fundamental stability of parallel RL training on Windows/Linux and introduces Bayesian Optimization for reward parameters.**
+
+### 17.1 Multiprocessing Stability: The `spawn` Architecture
+
+In Linux environments with CUDA, the default `fork` method often poisons the CUDA context, leading to silent training crashes.
+
+**V5 Solution**:
+- **Execution Mode**: `multiprocessing.set_start_method('spawn', force=True)`
+- **Deferred Initialization**: Device selection (`torch.device`) and model loading are deferred until *after* the process has spawned.
+- **Robust Cleanup**: The training loop is wrapped in a `try/finally` block that ensures `envs.close()` is called even during fatal errors, preventing "zombie" worker processes from hanging in VRAM.
+
+---
+
+### 17.2 Optuna-Based Reward Optimization
+
+V5 replaces the heuristic Genetic Algorithm with a **Bayesian Optimization** approach using the **Tree-structured Parzen Estimator (TPE)**.
+
+#### Distributed Tuning Architecture
+Instead of local population files, we use a **Centralized RDB Backend (SQLite)**:
+
+```mermaid
+graph TD
+    subgraph "Parallel Explorer Pool"
+        W1[Worker 1]
+        W2[Worker 2]
+        W8[Worker 8]
+    end
+
+    subgraph "Optimization Kernel"
+        DB[("optuna_rewards.db\n(SQLite)")]
+        TPE[TPE Sampler]
+    end
+
+    W1 & W2 & W8 -->|Ask Params| DB
+    DB -->|Suggest Vectors| W1 & W2 & W8
+    W1 & W2 & W8 -->|Tell Rewards| DB
+    DB -->|Update Model| TPE
+```
+
+#### Key Optimization Parameters
+The system tunes four critical scaling factors simultaneously:
+1. `risk_reduction_scale`: Sensitivity to attack mitigation.
+2. `action_cost_scale`: Balance between aggression and efficiency.
+3. `fp_penalty_scale`: Sensitivity to false positives on benign devices.
+4. `stall_penalty_scale`: Penalty for inactivity during high-risk windows.
+
+---
+
+### 17.3 The "Centralized Study" Mechanism
+
+To ensure all 8 workers collaborate rather than compete, we implement a **Centralized Study Path**:
+
+1. **Path Injection**: The root training process calculates the absolute path to the Run ID folder.
+2. **DB URL**: A `sqlite:///.../optuna_rewards.db` URL is generated and passed to all workers.
+3. **Collision Avoidance**: We implement a **Retry Jitter** mechanism. If two workers attempt to write to the SQLite file at the exact same millisecond, they back off by a random $1.0 + \text{rand}(0,1)$ seconds and retry.
+
+**Benefit**: This allows us to scale to high environment counts (16+) without database corruption.
+
+---
+
+### 17.4 Summary of Reliability Fixes
+
+| Bug Type | Symptom | V5 Fix |
+| :--- | :--- | :--- |
+| **CUDA Poisoning** | Silent Training Crash | **Spawn** Start Method |
+| **Zombie Workers** | VRAM Leak / GPU Freeze | **Finally: envs.close()** |
+| **Attribute Error** | Scheduler Crash | `get_value()` Mapping |
+| **Race Condition** | File Corruption | **SQLite Retries + Jitter** |
+
+**Current Status**: Production Stable. Training runs can now sustain 5M+ steps without manual intervention.
