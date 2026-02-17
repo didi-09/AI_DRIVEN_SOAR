@@ -10,39 +10,38 @@
 
 The SOAR System operates as a closed-loop control system. It observes the network state, processes it through two Neural Networks, and outputs mitigation actions.
 
-### Architecture Diagram
+### Architecture Diagram (V5 Distributed)
 ```mermaid
 graph TD
-    subgraph "The World (Simulator)"
-        Attacker["Attacker Script (Nmap/Exploits)"]
-        Network["Network Topology (Nodes/Links)"]
-        Logs["System Logs & Alerts"]
-        
-        Attacker -->|Generates Traffic| Network
-        Network -->|Emits Data| Logs
+    subgraph "Optimization Kernel"
+        DB[("optuna_rewards.db\n(SQLite)")]
+        TPE["TPE Sampler"]
     end
 
-    subgraph "The Perception System (Observer)"
-        Logs -->|Preprocessing| Features["Raw Features"]
-        Features -->|Autoencoder| Latent["12D Latent State"]
-        Latent -->|Anomaly Detection| Risk["Risk Score"]
+    subgraph "Simulator Pool (Spawned Workers)"
+        Env1["CyberRangeEnv 1"]
+        Env2["CyberRangeEnv 2"]
+        EnvN["CyberRangeEnv N"]
     end
 
-    subgraph "The Decision System (Agent)"
-        Latent -->|Policy Network| Actor["Action Probabilities"]
-        Actor -->|Sampling| ActionID["Action Selection"]
+    subgraph "The Control Center (GPU)"
+        Obs["Observer Net (Latent Vision)"]
+        Agent["PPO Agent (512 Units)"]
     end
 
-    ActionID -->|Python Execution| Mitigation["Mitigation Script"]
-    Mitigation -->|Modifies State| Network
+    DB -->|Scaling Vectors| Env1 & Env2 & EnvN
+    Env1 & Env2 & EnvN -->|Telemetry| Obs
+    Obs -->|12D State| Agent
+    Agent -->|Mitigation Action| Env1 & Env2 & EnvN
+    Env1 & Env2 & EnvN -->|Total Reward| DB
 ```
 
 ### Explanation
-1.  **The World (Event-Driven Simulation)**: The `Simulator` (defined in `simulator/env.py`) runs an asynchronous event-driven loop. Unlike static simulators, ours implements **Network Dynamics**: an action on `Node A` propagation-delay impacts `Node B`.
-2.  **The Perception System (Observer V3 - The "Eyes")**: This is the critical component that converts unstructured network noise into actionable data. It uses **Multi-Modal Feature Fusion** (Logs, Alerts, Telemetry) and compresses it into a high-variance 12D signal.
-3.  **Synchronization Layer (Path Injection)**: In V3, we inject the final weights of the Stage 1 Observer directly into the PPO's `CyberRangeEnv` setup. This prevents the "Brain" from ever being "Blind."
-4.  **The Decision System (Agent - The "Brain")**: A PPO algorithm (defined in `train/train_ppo.py`) learns to associate 12D state patterns with specific mitigation actions. It treats the environment as a **Partially Observable Markov Decision Process (POMDP)**.
-5.  **Mitigation (Active Control)**: Actions are executed via `CyberRangeEnv.step()`, which triggers Python scripts to alter firewall tables, isolate subnets, or deploy honeypots in real-time.
+1.  **Distributed Simulation Pool (The Body)**: The `Simulator` (defined in `simulator/env.py`) runs across multiple parallel processes. V5 uses the **Spawn** method to ensure CUDA-safety and process isolation.
+2.  **The Perception System (The "Eyes")**: A high-capacity neural network converts unstructured network logs and telemetry into a stable 12D signal.
+3.  **Optimization Kernel (Optuna)**: A centralized SQLite database coordinates reward parameter tuning across all parallel workers using Bayesian Optimization (TPE).
+4.  **The Decision System (The "Brain")**: A 512-unit PPO Agent (V5) learns to associate 12D state patterns with specific mitigation actions, treating the environment as a **Partially Observable Markov Decision Process (POMDP)**.
+5.  **Mitigation (Active Control)**: Actions are executed via `CyberRangeEnv.step()`, which triggers Python scripts to alter firewall tables or isolate subnets in real-time.
 ---
 
 ## 2. Component Detail: The Observer (Vision) 👁️
@@ -191,14 +190,14 @@ V3 fixed the Observer (High Class Separation: 0.64) but introduced a subtle pipi
 
 The system has evolved through three major distinct architectures:
 
-| Feature | V3 (Stabilized) | V4 (Hyper-Boost) | V5 (Reliable Optuna) |
-| :--- | :--- | :--- | :--- |
-| **Latent Activation** | **LayerNorm** | **LayerNorm** | **LayerNorm** |
-| **Learning Mode** | Active Loop (Single) | **Active Loop (Vectorized)** | **Distributed Global Tuning** |
-| **Simulation Speed** | 150 steps/sec | **2,400 steps/sec** | **2,400 steps/sec (Stable)** |
-| **Reward Tuning** | Manual / Static | Manual / Static | **Optuna TPE (Dynamic)** |
-| **Worker Backend** | Single Process | Multiprocessing (Fork) | **Spawn (CUDA Safe)** |
-| **Pipeline State** | **Good Eyes, Blind Brain** | **Full Mastery** | **Industrial Stability** |
+| Feature | V3 (Stabilized) | V5 (Reliable Optuna) |
+| :--- | :--- | :--- |
+| **Latent Activation** | **LayerNorm** | **LayerNorm** |
+| **Simulation Speed** | 150 stp/s | **2,400 stp/s** |
+| **Reward Tuning** | Manual / Static | **Optuna TPE (Dynamic)** |
+| **Worker Backend** | Single Process | **Spawn (CUDA Safe)** |
+| **Agent Net** | 256 Units | **512 Units (Deep)** |
+| **Industrial Stability**| Medium | **High (Autonomous)** |
 
 ### Mathematical Proof: The "Dead Neuron" Problem
 186. *   **Legacy (Sigmoid/Tanh)**: These functions have a derivative $f'(x)$ that approaches **Zero** as $|x|$ increases. In the bottleneck of an Autoencoder, this leads to **Gradient Death**: the model can no longer propagate errors back to the early layers.
@@ -221,9 +220,10 @@ graph LR
         L3 --> LN["LayerNorm + SDP Attn"]
         LN --> H["Healthy High-Variance States"]
     end
-    subgraph "V4: Deep Brain"
-        H -->|512 Units| DeepNet["Deeper Capacity"]
-        DeepNet -->|Orthogonal Init| Stable["Stable Gradients"]
+    subgraph "V5: Autonomous Discovery (Current)"
+        H -->|512 Units| DeepNet["Refined Deep Brain"]
+        DeepNet -->|Optuna TPE Tuning| Stable["Optimized Strategy"]
+        Stable -->|Reliable Spawn| Run["Autonomous Run"]
     end
 ```
 
@@ -238,23 +238,17 @@ graph TD
         Stage1_3[Train Obs] --> Propagation["Direct Path Injection"]
         Propagation --> Stage2_3["Live Sync: Agent uses specialized Obs"]
     end
-    subgraph "V4: Hyper-Vectorized"
-        Stage1_4[Train Obs] --> Shared["Shared Memory Curtain"] 
-        Shared --> Workers4["16x Parallel Worker Loops"]
-        Workers4 -->|Async Rollouts| PPO4["Central Learner (512 Units)"]
-    end
-    subgraph "V5: Distributed Global Tuning (Current)"
-        Study["SQLite Study (optuna_rewards.db)"] -->|Ask Params| Workers5["Spawned Workers (Safe CUDA)"]
-        Workers5 -->|Tell Rewards| Study
-        Study -->|TPE Sampler| Optimizer["Global Reward Optimizer"]
+    subgraph "V5: Reliable Distributed (Current)"
+        Study["SQLite Study"] -->|Suggest Scaling| Workers5["Spawned Workers (Parallel)"]
         Workers5 -->|Step Data| PPO5["Central Learner (512 Units)"]
+        PPO5 -->|Tell Rewards| Study
     end
 ```
 
 ### Training Flow Evolution
 *   **V2**: Static Datasets -> Slow Iteration -> Manual Completion.
 *   **V3**: Pooled Pool (4+ Datasets) -> Turbo Binary Caching -> Perfection-Driven Early Exit.
-*   **V4**: **Vectorized Parallelism (16 Envs)** -> **Shared Curriculum State** -> **Deep Capacity (512 Units)**.
+*   **V5 (Reliable Optuna)**: **Distributed Spawn Parallelism** -> **Shared Curriculum State** -> **Autonomous Reward Tuning (Optuna)**.
 
 ---
 
@@ -276,21 +270,24 @@ The Agent collapsed to a single "Safety Action" (Action 332: Rotate Credentials)
 - **Action Repetition**: **95.00%** (Repeated same action)
 - **Policy Entropy**: Near Zero.
 
-**Conclusion**: The "Body" and "Eyes" are healthy. The "Brain" needs to be retrained with the correct data stream. This leads to the V4 Architecture.
+**Conclusion**: The "Body" and "Eyes" are healthy. The "Brain" needs to be retrained with the correct data stream and optimized scaling. This leads to the **V5 Architecture**.
 
----
+## 9. V5 Architecture: Reliable Optuna Tuning 🚀
 
-## 9. V4 Architecture: Hyper-Boost & Deep Brain 🚀
-
-To solve the V3 issues and achieve production-grade performance, we introduced the **V4 "Hyper Boost" Architecture**.
+To solve the V3 issues and achieve production-grade performance, we introduced the **V5 "Reliable Optuna" Architecture**. This version consolidates the speed of vectorized training with the intelligence of Bayesian Reward Tuning.
 
 ### Key Innovations
 
-1.  **Vectorized Parallel Training (The Speedup)**
+1.  **Bayesian Reward Optimization (Optuna)**
+    *   **Mechanism**: Replaces the Genetic Algorithm with **TPE (Tree-structured Parzen Estimator)**.
+    *   **Architecture**: Uses a centralized SQLite database (`optuna_rewards.db`) to coordinate scaling factors across all parallel workers.
+    *   **Efficiency**: Optuna finds the optimal balance of "Mitigation Reward" vs "False Positive Penalty" in 5x fewer episodes than GA.
+
+2.  **Vectorized Parallel Training (The Speedup)**
     *   **Old (V3)**: Single linear simulation (1 step / CPU cycle).
-    *   **New (V4)**: **16x Parallel Environments** (`AsyncVectorEnv`).
-    *   **Mechanism**: We use `multiprocessing` to spawn independent gym environments. A shared `ctypes` integer synchronizes the Curriculum Level across all workers.
-    *   **Constraint**: Observers in worker threads are forced to **CPU** to prevent GPU VRAM explosion (OOM).
+    *   **Architecture**: **V5 Distributed Pool**.
+    *   **Mechanism**: We use `multiprocessing` with the **Spawn** method to ensure CUDA-safety. A shared `ctypes` integer synchronizes the Curriculum Level across all workers.
+    *   **Constraint**: Observers in worker threads are forced to **CPU** to prevent GPU VRAM explosion, while the central PPO learner lives on the **GPU**.
 
 2.  **Deep Brain Architecture (The Capacity)**
     *   **Old (V3)**: 256 Hidden Units.
@@ -302,36 +299,26 @@ To solve the V3 issues and achieve production-grade performance, we introduced t
     *   **New (V4)**: `orthogonal_init` with calculated gains ($\sqrt{2}$ for ReLU).
     *   **Effect**: Ensures gradients flow through the deep network without vanishing or exploding at the start of training.
 
-### V4 Architecture Diagram
+### V5 Architecture Diagram
 ```mermaid
 graph TD
     subgraph "Main Process (GPU)"
         Learner["PPO Learner"]
-        Mem["Replay Buffer (Batch: 16384)"]
-        Curriculum["Curriculum Controller"]
+        Mem["Replay Buffer (Batch: 32768)"]
+        Optimizer["Optuna TPE Sampler"]
     end
 
-    subgraph "Worker Pool (CPU)"
+    subgraph "Worker Pool (CPU Spawned)"
         W1["Env 1"]
         W2["Env 2"]
         W3["Env ..."]
-        W16["Env 16"]
+        W8["Env 8"]
     end
     
-    W1 --> Mem
-    W2 --> Mem
-    W3 --> Mem
-    W16 --> Mem
-    
-    Learner --> W1
-    Learner --> W2
-    Learner --> W3
-    Learner --> W16
-    
-    Curriculum -->|Shared Level| W1
-    Curriculum --> W2
-    Curriculum --> W3
-    Curriculum --> W16
+    Optimizer -->|Reward Params| W1 & W2 & W3 & W8
+    W1 & W2 & W3 & W8 -->|Experience| Mem
+    Mem -->|Gradients| Learner
+    W1 & W2 & W3 & W8 -->|Trial Result| Optimizer
 ```
 
 The simulator uses **Curriculum Learning** to progressively increase difficulty. The environment scales from 10 devices to 500, introducing 13 complex attack scenarios.
@@ -2316,78 +2303,3 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 
----
-
-## 17. Reliability & Optuna Optimization (Global Tuning) 🎯🛡️
-
-> [!IMPORTANT]
-> **V5 addresses the fundamental stability of parallel RL training on Windows/Linux and introduces Bayesian Optimization for reward parameters.**
-
-### 17.1 Multiprocessing Stability: The `spawn` Architecture
-
-In Linux environments with CUDA, the default `fork` method often poisons the CUDA context, leading to silent training crashes.
-
-**V5 Solution**:
-- **Execution Mode**: `multiprocessing.set_start_method('spawn', force=True)`
-- **Deferred Initialization**: Device selection (`torch.device`) and model loading are deferred until *after* the process has spawned.
-- **Robust Cleanup**: The training loop is wrapped in a `try/finally` block that ensures `envs.close()` is called even during fatal errors, preventing "zombie" worker processes from hanging in VRAM.
-
----
-
-### 17.2 Optuna-Based Reward Optimization
-
-V5 replaces the heuristic Genetic Algorithm with a **Bayesian Optimization** approach using the **Tree-structured Parzen Estimator (TPE)**.
-
-#### Distributed Tuning Architecture
-Instead of local population files, we use a **Centralized RDB Backend (SQLite)**:
-
-```mermaid
-graph TD
-    subgraph "Parallel Explorer Pool"
-        W1[Worker 1]
-        W2[Worker 2]
-        W8[Worker 8]
-    end
-
-    subgraph "Optimization Kernel"
-        DB[("optuna_rewards.db\n(SQLite)")]
-        TPE[TPE Sampler]
-    end
-
-    W1 & W2 & W8 -->|Ask Params| DB
-    DB -->|Suggest Vectors| W1 & W2 & W8
-    W1 & W2 & W8 -->|Tell Rewards| DB
-    DB -->|Update Model| TPE
-```
-
-#### Key Optimization Parameters
-The system tunes four critical scaling factors simultaneously:
-1. `risk_reduction_scale`: Sensitivity to attack mitigation.
-2. `action_cost_scale`: Balance between aggression and efficiency.
-3. `fp_penalty_scale`: Sensitivity to false positives on benign devices.
-4. `stall_penalty_scale`: Penalty for inactivity during high-risk windows.
-
----
-
-### 17.3 The "Centralized Study" Mechanism
-
-To ensure all 8 workers collaborate rather than compete, we implement a **Centralized Study Path**:
-
-1. **Path Injection**: The root training process calculates the absolute path to the Run ID folder.
-2. **DB URL**: A `sqlite:///.../optuna_rewards.db` URL is generated and passed to all workers.
-3. **Collision Avoidance**: We implement a **Retry Jitter** mechanism. If two workers attempt to write to the SQLite file at the exact same millisecond, they back off by a random $1.0 + \text{rand}(0,1)$ seconds and retry.
-
-**Benefit**: This allows us to scale to high environment counts (16+) without database corruption.
-
----
-
-### 17.4 Summary of Reliability Fixes
-
-| Bug Type | Symptom | V5 Fix |
-| :--- | :--- | :--- |
-| **CUDA Poisoning** | Silent Training Crash | **Spawn** Start Method |
-| **Zombie Workers** | VRAM Leak / GPU Freeze | **Finally: envs.close()** |
-| **Attribute Error** | Scheduler Crash | `get_value()` Mapping |
-| **Race Condition** | File Corruption | **SQLite Retries + Jitter** |
-
-**Current Status**: Production Stable. Training runs can now sustain 5M+ steps without manual intervention.
