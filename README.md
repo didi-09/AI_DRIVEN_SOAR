@@ -1,7 +1,7 @@
-# DIDI RL SOAR V6: The Omnibus Technical Specification 🛡️🧠
+# DIDI RL SOAR V7: The Omnibus Technical Specification 🛡️🧠
 
 > [!IMPORTANT]
-> **This is the Definitive Master Specification (V6.0.0).**
+> **This is the Definitive Master Specification (V7.0.0).**
 > It includes the complete Technical Architecture, Operational Manual, Configuration Reference, and Validated Performance Metrics.
 
 ---
@@ -15,20 +15,20 @@ DIDI RL SOAR is a closed-loop **Autonomous Cyber-Defense System**. It replaces s
 ### The System at a Glance
 *   **The Problem**: Traditional SOAR tools (Splunk Phantom, XSOAR) run static scripts. They cannot adapt to novel attacks or balance "Security vs. Business Continuity."
 *   **The Solution**: A **Reinforcement Learning (PPO)** agent that learns optimal defense strategies by training against a hyper-realistic simulator.
-*   **Current State (V6)**: The system has achieved **Production Mastery** (Risk Delta > 0.94) using a Distributed "Deep Eyes" architecture.
+*   **Current State (V7)**: The system has achieved **Precision Sight** (Risk Delta 0.99) and is currently undergoing **Clean Slate 5M Training** using a Residual V7 architecture.
 
 ---
 
-## 2. System Architecture: The V5 Loop 🌐
+## 2. System Architecture: The V7 Loop 🌐
 
-The V6 architecture provides a **Distributed Reinforcement Learning System** designed to solve the "Training Speed vs. VRAM" bottleneck.
+The V7 architecture provides a **Distributed Reinforcement Learning System** designed to solve the "Training Speed vs. VRAM" bottleneck.
 
 ### 2.1 High-Level Architecture Diagram
 ```mermaid
 graph TD
     subgraph "The Brain (GPU - Central Learner)"
         Obs_Net["Observer Net (Deep Eyes)"]
-        Agent_Net["PPO Agent (512 Units)"]
+        Agent_Net["PPO Agent (V7 Residual)"]
         Replay["Global Replay Buffer"]
         TPE["Optuna Optimization Kernel"]
     end
@@ -81,7 +81,7 @@ sequenceDiagram
     Observer->>Agent: 12D Latent State Vector (Z-Scored)
     
     Note over Agent, World: Phase 2: Decision
-    Agent->>Agent: Forward Pass (3x 512 Layers)
+    Agent->>Agent: Forward Pass (V7 Residual Blocks)
     Agent->>Agent: Apply Valid Action Mask
     Agent->>World: Action ID (e.g., 221 Block IP)
     
@@ -201,34 +201,34 @@ High-confidence alerts from the IDS used to anchor the "Deep Eyes" Risk Score.
 
 The Agent uses **Proximal Policy Optimization (PPO)** to learn strategy.
 
-### 4.1 Agent Neural Architecture (V6)
+### 4.1 Agent Neural Architecture (V7 - Residual)
 ```mermaid
 graph TD
     State["12D Input State"]
 
-    subgraph "Shared Perception (512 Units)"
-        State -->|Linear 512| L1["Layer 1"]
-        L1 -->|ReLU| L2["Layer 2"]
-        L2 -->|ReLU| L3["Layer 3 (Extra Depth)"]
-        L3 -->|ReLU| SharedOut["Shared Features"]
+    subgraph "Shared Perception (Residual V7)"
+        State -->|Linear 512| L1["Layer 1 + LayerNorm"]
+        L1 -->|Relu| R1["ResBlock 1"]
+        R1 -->|Relu| R2["ResBlock 2"]
+        R2 --> SharedOut["Shared Features"]
     end
 
-    subgraph "The Actor (Policy)"
-        SharedOut -->|Linear 256| LA["Actor Latent"]
-        LA -->|ReLU| Logits["Action Logits"]
-        Logits -->|Mask| Masked["Valid Logits"]
-        Masked -->|Sample| Action["Selected Action"]
+    subgraph "The Actor (Deep Policy)"
+        SharedOut -->|Linear 256| LA1["Latent 1 + LN"]
+        LA1 -->|ReLU| LA2["Latent 2 (128)"]
+        LA2 -->|Logits| Action["Selected Action"]
     end
 
-    subgraph "The Critic (Value)"
-        SharedOut -->|Linear 256| LC["Critic Latent"]
-        LC -->|ReLU| Value["Predicted Value"]
+    subgraph "The Critic (Deep Value)"
+        SharedOut -->|Linear 256| LC1["Latent 1 + LN"]
+        LC1 -->|ReLU| LC2["Latent 2 (128)"]
+        LC2 -->|Value| Value["Predicted Value"]
     end
 ```
 ### Operational Logic: Deep Reasoning
-1.  **Shared Perception (3 Layers)**: Deep stack of 512 neurons builds higher-order concepts.
-2.  **The Actor**: Outputs probabilities for action using a Softmax distribution.
-3.  **The Critic**: Outputs a single number $V(s)$ to stabilize training.
+1.  **Shared Perception (V7 Residual)**: Implements identity mapping with LayerNorm for stable convergence.
+2.  **The Actor**: Deep head (2-layer) outputs probabilities for action using a Softmax distribution.
+3.  **The Critic**: Deep head (2-layer) outputs a single number $V(s)$ to stabilize training.
 
 ### 4.2 The 12-Dimensional State Vector
 Using **Online Z-Score Normalization**:
@@ -278,12 +278,12 @@ graph LR
 
 ## 6. Historical Evolution: V1 to V6 📜
 
-| Feature | V1 (Prototype) | V3 (Legacy) | V6 (Deep Eyes) | Status |
+| Feature | V3 (Legacy) | V6 (Deep Eyes) | V7 (Current) | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Observer Architecture** | 1-Layer | 2-Layer | **3-Layer "Deep Eyes" (V6)** | ✅ Solved |
-| **Latent Dims** | 12D (Zero Var) | 12D (Low Var) | **12D (High Contrast)** | ✅ Solved |
-| **Bootstrap** | Standard | Noisy | **Contrastive Synthetic (133k)** | ✅ Solved |
-| **Training Speed** | 40 steps/sec | 120 steps/sec | **850 steps/sec** | ✅ Solved |
+| **Observer Architecture** | 2-Layer | 3-Layer | **3-Layer "Deep Eyes"** | ✅ Solved |
+| **Latent Dims** | 12D (Low Var) | 12D (High Contrast) | **12D (0.99 Delta)** | ✅ Solved |
+| **Agent Foundation** | MLP 256 | MLP 512 (V6) | **V7 Residual + LN** | ✅ Solved |
+| **Training Steps** | 500k | 1M | **5M Clean Slate** | ⏳ Active |
 
 ---
 
@@ -303,13 +303,11 @@ Training follows a strict **Curriculum Learning** path.
 
 ## 8. Validated Evaluation: The Ultimate Diagnostic 📊
 
-### 8.1 Production Scale Performance (Level 4 - Post Sharpening)
-*   **Risk Delta**: **0.992** (Target: >0.5) ✅
-*   **Attack Recovery**: **100% (Confirmed)**
-*   **Mean Time to Contain**: **3 Steps**
-*   **False Positive Rate**: **<1.0%** ✅
-*   **Avg Reward (Attack)**: **+140.60**
-*   **Avg Reward (Benign)**: **+0.05**
+### 8.1 Current Training Metrics (V7 Clean Slate)
+*   **Observer Risk Delta**: **0.9927** (Precision Sight) ✅
+*   **Target steps**: **5,000,000**
+*   **Status**: **Converging** (Value Loss: 0.23) ⏳
+*   **Current Reward (Level 0)**: **+9.40** (Success String) 🚀
 
 ---
 
@@ -392,7 +390,7 @@ PYTHONPATH=. .venv/bin/python train/train_ppo.py \
     --steps 5000000 \
     --n_envs 4 \
     --lr 3e-4 \
-    --id "v6_distributed_run"
+    --id "v7_clean_slate_run"
 ```
 
 ### 12.2 Run Diagnostic Evaluation
@@ -416,5 +414,5 @@ PYTHONPATH=. .venv/bin/python eval/ultimate_deep_diagnostic.py \
 
 ---
 
-**Document Version**: 6.0.0 (The Omnibus Edition)
+**Document Version**: 7.0.0 (The Residual Edition)
 **Generated By**: Antigravity (Google DeepMind)
