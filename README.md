@@ -104,33 +104,35 @@ The Observer is the system's perception engine. Its job is **Dimensionality Redu
 ### 3.1 Observer Architecture
 ```mermaid
 graph TD
-    Input_Logs["Log Text (Seq: 32)"]
-    Input_Alerts["Snort Alert ID"]
-    Input_Metrics["Device Metrics"]
+    Input_Logs["Log Text (Seq: 50, Dim: 32)"]
+    Input_Alerts["Suricata Alerts (Seq: 100, Dim: 16)"]
+    Input_Metrics["Telemetry (Dim: 32)"]
 
-    subgraph "Feature Extraction"
-        Input_Logs -->|Bi-LSTM| Feat_Text["Temporal Context"]
-        Input_Alerts -->|Embedding| Feat_Alert["Semantic ID"]
-        Input_Metrics -->|Log1p| Feat_Metric["Scaled Telemetry"]
+    subgraph "Feature Extraction (Encoders)"
+        Input_Logs -->|Bi-LSTM + Attn| Feat_Text["Temporal Features (64D)"]
+        Input_Alerts -->|Bi-LSTM + Attn| Feat_Alert["Alert Context (64D)"]
+        Input_Metrics -->|2-Layer MLP| Feat_Metric["Scaled Metrics (64D)"]
     end
 
-    subgraph "Fusion Core"
-        Feat_Text --> Integrated["Joint Vector (88D)"]
-        Feat_Alert --> Integrated
-        Feat_Metric --> Integrated
-        Integrated -->|Relu| L1["Layer 1 (256)"]
+    subgraph "Fusion & Processing"
+        Feat_Text --> Joint["Fusion Vector (192D)"]
+        Feat_Alert --> Joint
+        Feat_Metric --> Joint
+        Joint -->|LayerNorm| FN["Fusion Norm"]
+        FN -->|Relu| L1["Layer 1 (256)"]
         L1 -->|Relu| L2["Layer 2 (128)"]
-        L2 -->|LayerNorm| Latent["Latent State (12D)"]
+        L2 -->|Relu| L3["Internal Latent (12)"]
     end
 
-    subgraph "Objectives"
-        Latent -->|Decoder| Recon["Reconstruction Loss"]
-        Latent -->|Guard| Signal["3D Signal: Risk, Conf, Sev"]
-        Signal -->|BCE| GroundTruth["Attack Labels"]
+    subgraph "Output Synthesis"
+        L3 -->|Risk Head| Signal["3D Signal: Risk, Conf, Sev"]
+        L3 -->|Decoder| Recon["Reconstruction Loss"]
+        Signal -->|Injection| Final["Final 12D State Vector"]
+        L3 -->|Residual| Final
     end
 ```
-### Operational Logic: The Fusion Core
-The Observer fuses three incompatible data types (Text, Categorical, Continuous) into a **Joint Vector (88D)** and compresses it down to **12D**. The **Semantic Guard** ensures this compressed representation retains "Risk Score".
+### Operational Logic: The V6 "Deep Eyes"
+The Observer uses a **192D Fusion Core** ($64 \times 3$) to merge multi-modal inputs. The **Injection Step** in the Output Synthesis is critical: the first 3 components of the latent vector are replaced by the interpreted (Risk, Confidence, Severity) predictions to provide the PPO Agent with "Semi-Supervised" grounding.
 
 ### 3.2 Detailed Logic: Multi-Modal Attention
 The `MultiModalEncoder` uses a dedicated Attention Mechanism to handle variable-length log sequences.
@@ -138,7 +140,7 @@ The `MultiModalEncoder` uses a dedicated Attention Mechanism to handle variable-
 ```mermaid
 graph LR
     Input["Input Sequence (N x 64)"] --> LSTM[Bi-LSTM Layer]
-    LSTM --> Hidden["Hidden States (N x 128)"]
+    LSTM --> Hidden["Hidden States (N x 512)"]
     
     subgraph "Attention Mechanism"
         Hidden --> Attn["Attention Linear Layer"]
@@ -147,10 +149,9 @@ graph LR
         Softmax --> Weights["Attention Weights"]
     end
     
-    Weights --> Dot["Weighted Sum"]
+    Weights --> Dot["Weighted Sum (512D)"]
     Hidden --> Dot
-    Dot --> Context["Context Vector (128)"]
-    Context --> Output["Linear Projection (64)"]
+    Dot --> Proj["Output Projection (64D)"]
 ```
 ### Operational Logic: Why Attention Matters
 In a Cyber Attack, 99% of logs are noise. The Attention Mechanism assigns a weight $\alpha_i$ to each log entry, allowing the Observer to "zoom in" on the exploit attempt.
