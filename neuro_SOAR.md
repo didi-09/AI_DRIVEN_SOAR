@@ -70,8 +70,45 @@ graph TD
 *   **Goal**: Compresses billions of logs into 12-32 "Neural Tokens" that the decision engine can understand.
 
 ### 🏛️ B. Memory: The Vault
+
+#### B.1 Retrieval-Augmented Reasoning (RAR)
+While traditional RAG produces text, **RAR produces Contextual Grounding for Actions.**
+
+**How it works:**
+1.  **Semantic Retrieval**: The "Deep Eyes" generate a 12D Embedding of the current threat. The system searches the **Vector DB** for the top $K$ most similar historical episodes.
+2.  **Reasoning Augmentation**: Instead of just choosing an action based on the "Now," the PPO Agent receives a concatenated input: `[Current_State + Historical_Success_Context]`.
+3.  **Experience-Driven Policy**: The model weighs "What worked last time" against the "Present Reality."
+
+```mermaid
+graph LR
+    Obs["Observer (Now)"] -->|Embedding| Search["Vector Search"]
+    subgraph "Vector DB (Episodic Memory)"
+        Store[("Historical Traces")]
+    end
+    Search --> Store
+    Store -->|Recalled Successes| RAR["RAR Context Buffer"]
+    RAR -->|Augmented Signal| Hub["PPO Decision Hub"]
+    Obs -->|Current Signal| Hub
+```
+
 *   **Episodic Memory (Vector DB)**: Stores short-term experiences. If an IP behaves weirdly once, then hides, and comes back 10 minutes later, the Vector DB anchors the memory to prevent "short-term blindness."
 *   **Semantic Memory (Knowledge Graph)**: Stores the "Laws of the World." It knows which devices are critical (Hospital Ventilator vs. Guest Wi-Fi) and the topology of the office.
+
+#### B.2 The Explanation Engine (Standard RAG)
+While RAR focuses on the *decision*, the Explanation Engine focuses on the *audit trail*.
+
+*   **Mechanism**: The system fetches historical "After-Action Reports" (AARs) from the Vector DB that match the current anomaly. 
+*   **Generation**: It uses an LLM-Agent to synthesize the current logs, the historical precedents, and the symbolic rules into a natural language report.
+*   **Output**: *"I isolated the device because [Current Log Pattern] matches [Historical Attack #421], and [Security Policy #1] allows for non-destructive containment on this asset class."*
+
+```mermaid
+graph TD
+    Hub[PPO Decision] -->|Action Taken| E_Hub[Explanation Engine]
+    Store[Vector DB] -->|Historical AARs| E_Hub
+    Logs[Current Logs] -->|Evidence| E_Hub
+    Rules[Symbolic Rules] -->|Justification| E_Hub
+    E_Hub -->|Human Readable| Audit_Log[SEC-OPS Dashboard]
+```
 
 ### 🎭 C. Imagination: The World Model
 *   **Technology**: DreamerV3 / State-Space Predictors.
