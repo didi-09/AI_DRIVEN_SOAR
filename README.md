@@ -36,7 +36,7 @@ graph TD
     subgraph "The Body (CPU - Distributed Pool)"
         Worker1["Worker 1: CyberRangeEnv"]
         Worker2["Worker 2: CyberRangeEnv"]
-        Worker3["Worker ..."]
+        Worker3["Worker N: CyberRangeEnv"]
         Worker8["Worker 8: CyberRangeEnv"]
     end
 
@@ -69,26 +69,26 @@ The diagram above illustrates the **Async-Synchronous Hybrid Model** used in V6.
 ### 2.2 The "Perception-Action" Cycle (Sequence Diagram)
 ```mermaid
 sequenceDiagram
-    participant World as Environment (CPU)
-    participant Observer as Deep Eyes (Observer)
-    participant Agent as Deep Brain (Policy)
-    participant Buffer as Replay Buffer
+    participant World as "Environment (CPU)"
+    participant Observer as "Deep Eyes (Observer)"
+    participant Agent as "Deep Brain (Policy)"
+    participant Buffer as "Replay Buffer"
     
     Note over World, Observer: Phase 1: Perception
-    World->>Observer: Raw Logs (Auth, Apache) + Telemetry
+    World->>Observer: Raw Logs + Telemetry
     Observer->>Observer: Tokenize & Embed (Bi-LSTM)
     Observer->>Observer: Attention Pooling
-    Observer->>Agent: 12D Latent State Vector (Z-Scored)
+    Observer->>Agent: 12D Latent State Vector
     
     Note over Agent, World: Phase 2: Decision
-    Agent->>Agent: Forward Pass (V7 Residual Blocks)
+    Agent->>Agent: Forward Pass (V7 Residual)
     Agent->>Agent: Apply Valid Action Mask
     Agent->>World: Action ID (e.g., 221 Block IP)
     
     Note over World, Buffer: Phase 3: Effect
-    World->>World: Resolve Physics (Mitigation)
-    World->>Agent: Reward Signal (R_t)
-    World->>Buffer: Store Tuple (s, a, r, s', done)
+    World->>World: Resolve Physics
+    World->>Agent: Reward Signal
+    World->>Buffer: Store Transition Tuple
 ```
 ### Operational Logic: From Chaos to Order
 1.  **Phase 1 (Perception)**: The World generates messy string data. The **Observer** acts as a funnel using Bi-LSTM layers to condense them into a clean **12D Vector**.
@@ -108,27 +108,27 @@ graph TD
     Input_Alerts["Suricata Alerts (Seq: 100, Dim: 16)"]
     Input_Metrics["Telemetry (Dim: 32)"]
 
-    subgraph "Feature Extraction (Encoders)"
-        Input_Logs -->|Bi-LSTM + Attn| Feat_Text["Temporal Features (64D)"]
-        Input_Alerts -->|Bi-LSTM + Attn| Feat_Alert["Alert Context (64D)"]
-        Input_Metrics -->|2-Layer MLP| Feat_Metric["Scaled Metrics (64D)"]
+    subgraph "Feature Extraction"
+        Input_Logs -->|"Bi-LSTM + Attn"| Feat_Text["Temporal Features (64D)"]
+        Input_Alerts -->|"Bi-LSTM + Attn"| Feat_Alert["Alert Context (64D)"]
+        Input_Metrics -->|"2-Layer MLP"| Feat_Metric["Scaled Metrics (64D)"]
     end
 
     subgraph "Fusion & Processing"
         Feat_Text --> Joint["Fusion Vector (192D)"]
         Feat_Alert --> Joint
         Feat_Metric --> Joint
-        Joint -->|LayerNorm| FN["Fusion Norm"]
-        FN -->|Relu| L1["Layer 1 (256)"]
-        L1 -->|Relu| L2["Layer 2 (128)"]
-        L2 -->|Relu| L3["Internal Latent (12)"]
+        Joint -->|"LayerNorm"| FN["Fusion Norm"]
+        FN -->|"Relu"| L1["Layer 1 (256)"]
+        L1 -->|"Relu"| L2["Layer 2 (128)"]
+        L2 -->|"Relu"| L3["Internal Latent (12)"]
     end
 
     subgraph "Output Synthesis"
-        L3 -->|Risk Head| Signal["3D Signal: Risk, Conf, Sev"]
-        L3 -->|Decoder| Recon["Reconstruction Loss"]
-        Signal -->|Injection| Final["Final 12D State Vector"]
-        L3 -->|Residual| Final
+        L3 -->|"Risk Head"| Signal["3D Signal Predictions"]
+        L3 -->|"Decoder"| Recon["Reconstruction Loss"]
+        Signal -->|"Injection"| Final["Final 12D State Vector"]
+        L3 -->|"Residual"| Final
     end
 ```
 ### Operational Logic: The V6 "Deep Eyes"
@@ -207,22 +207,17 @@ graph TD
     State["12D Input State"]
 
     subgraph "Shared Perception (Residual V7)"
-        State -->|Linear 512| L1["Layer 1 + LayerNorm"]
-        L1 -->|Relu| R1["ResBlock 1"]
-        R1 -->|Relu| R2["ResBlock 2"]
+        State -->|"Linear 512"| L1["Layer 1 + LayerNorm"]
+        L1 -->|"Relu"| R1["ResBlock 1"]
+        R1 -->|"Relu"| R2["ResBlock 2"]
         R2 --> SharedOut["Shared Features"]
     end
 
-    subgraph "The Actor (Deep Policy)"
-        SharedOut -->|Linear 256| LA1["Latent 1 + LN"]
-        LA1 -->|ReLU| LA2["Latent 2 (128)"]
-        LA2 -->|Logits| Action["Selected Action"]
-    end
-
-    subgraph "The Critic (Deep Value)"
-        SharedOut -->|Linear 256| LC1["Latent 1 + LN"]
-        LC1 -->|ReLU| LC2["Latent 2 (128)"]
-        LC2 -->|Value| Value["Predicted Value"]
+    subgraph "Decision Heads"
+        SharedOut -->|"Actor Branch"| ActorHead["Actor MLP Head"]
+        SharedOut -->|"Critic Branch"| CriticHead["Critic MLP Head"]
+        ActorHead -->|"Logits"| Action["Selected Action"]
+        CriticHead -->|"Value"| Value["Predicted Value"]
     end
 ```
 ### Operational Logic: Deep Reasoning
