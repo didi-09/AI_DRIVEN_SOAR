@@ -309,7 +309,7 @@ flowchart TD
 
 ### 5.2 Centroid Cosine Similarity Matrix
 
-![Cosine Similarity Matrix](outputs/observer_diag/test1_cosine_sim_matrix.png)
+![Cosine Similarity Matrix](test1_cosine_sim_matrix.png)
 
 Key findings:
 - **DoS** is the most isolated cluster (cosine sim < 0.2 with most other types)
@@ -319,7 +319,7 @@ Key findings:
 
 ### 5.3 Risk Score Distribution (Unsupervised — No Fine-Tuning)
 
-![Risk Score Distribution](outputs/observer_diag/test3_risk_distribution.png)
+![Risk Score Distribution](test3_risk_distribution.png)
 
 The Phase 1 risk head already shows correct ordering **without any supervised labels**:
 
@@ -335,19 +335,19 @@ The Phase 1 risk head already shows correct ordering **without any supervised la
 
 ### 5.4 Linear Probe Confusion Matrix (100% Accuracy)
 
-![Confusion Matrix](outputs/observer_diag/test4_confusion_matrix.png)
+![Confusion Matrix](test4_confusion_matrix.png)
 
 Every cell off-diagonal is **zero**. A logistic regression trained on frozen Phase 1 embeddings perfectly separates all 12 classes (11 attacks + noise) on 960 held-out test samples. This proves the encoder has learned **linearly separable class representations** without ever seeing a supervised label.
 
 ### 5.5 PCA Embedding Cluster Visualization
 
-![PCA Clusters](outputs/observer_diag/test5_pca_clusters.png)
+![PCA Clusters](test5_pca_clusters.png)
 
 PCA with 2 components explains 36.3% of variance (PC1=19.4%, PC2=16.9%). Even in this low-dimensional projection, all classes form tight, well-separated clusters. ★ = class centroid.
 
 ### 5.6 Noise Rejection Analysis
 
-![Noise Rejection](outputs/observer_diag/test6_noise_rejection.png)
+![Noise Rejection](test6_noise_rejection.png)
 
 | Nearest-Neighbor Similarity | Mean | Std |
 |----------------------------|------|-----|
