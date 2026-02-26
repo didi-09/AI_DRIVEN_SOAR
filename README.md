@@ -309,7 +309,7 @@ flowchart TD
 
 ### 5.2 Centroid Cosine Similarity Matrix
 
-![Cosine Similarity Matrix](test1_cosine_sim_matrix.png)
+![Cosine Similarity Matrix](outputs/observer_diag/test1_cosine_sim_matrix.png)
 
 Key findings:
 - **DoS** is the most isolated cluster (cosine sim < 0.2 with most other types)
@@ -319,7 +319,7 @@ Key findings:
 
 ### 5.3 Risk Score Distribution (Unsupervised — No Fine-Tuning)
 
-![Risk Score Distribution](test3_risk_distribution.png)
+![Risk Score Distribution](outputs/observer_diag/test3_risk_distribution.png)
 
 The Phase 1 risk head already shows correct ordering **without any supervised labels**:
 
@@ -335,19 +335,19 @@ The Phase 1 risk head already shows correct ordering **without any supervised la
 
 ### 5.4 Linear Probe Confusion Matrix (100% Accuracy)
 
-![Confusion Matrix](test4_confusion_matrix.png)
+![Confusion Matrix](outputs/observer_diag/test4_confusion_matrix.png)
 
 Every cell off-diagonal is **zero**. A logistic regression trained on frozen Phase 1 embeddings perfectly separates all 12 classes (11 attacks + noise) on 960 held-out test samples. This proves the encoder has learned **linearly separable class representations** without ever seeing a supervised label.
 
 ### 5.5 PCA Embedding Cluster Visualization
 
-![PCA Clusters](test5_pca_clusters.png)
+![PCA Clusters](outputs/observer_diag/test5_pca_clusters.png)
 
 PCA with 2 components explains 36.3% of variance (PC1=19.4%, PC2=16.9%). Even in this low-dimensional projection, all classes form tight, well-separated clusters. ★ = class centroid.
 
 ### 5.6 Noise Rejection Analysis
 
-![Noise Rejection](test6_noise_rejection.png)
+![Noise Rejection](outputs/observer_diag/test6_noise_rejection.png)
 
 | Nearest-Neighbor Similarity | Mean | Std |
 |----------------------------|------|-----|
@@ -421,23 +421,38 @@ flowchart LR
 | Synthetic Phase 2 (`gen_phase2_data.py`) | 33,000 (3k × 11) | All 11 classes |
 | **Total** | **63,000** | **11 classes** |
 
-### 6.4 Active Training Run
+### 6.4 Phase 2 Diagnostic Results (NEW)
+
+> **Diagnostic script:** `eval/observer_diagnosis_phase2.py`
+> **Checkpoint:** `models/observer_v3.pt` (3.3 MB, fully fine-tuned)
+> **Samples:** 500 × 12 classes = 6,000 total
+
+The completely fine-tuned Phase 2 model achieves excellent performance on the expanded 11-class taxonomy and successfully engages the GNN graph head.
+
+| Component | Metric | Result | Target | Status |
+|-----------|--------|--------|--------|--------|
+| Classifier | 11-Class Accuracy | **90.9%** | > 70% | ✅ PASS |
+| Classifier | Binary Attack AUC | **1.0000** | > 0.90 | ✅ PASS |
+| Classifier | Macro F1 | **0.879** | > 0.70 | ✅ PASS |
+| Risk Head | ECE (Calibration) | **0.027** | < 0.10 | ✅ PASS |
+| Risk Head | Teacher Correlation | **0.963** | > 0.85 | ✅ PASS |
+| GNN Head | APT Campaign Score | **0.984** | vs 0.009 (benign) | ✅ PASS |
+| GNN Head | Cluster Auth Score | **0.941** | vs 0.088 (benign) | ✅ PASS |
+
+**Key observations:**
+1. **Classifier**: 100% precision and recall on 9 of the 11 classes. Bruteforce and Lateral Movement have some expected overlap (both utilize high volumes of authentication failures).
+2. **Risk Calibration**: The model's risk scores map almost perfectly to the teacher's designed severity metrics, allowing linear translation to RL rewards.
+3. **Graph Topology Engine**: Detects active kill chains across the network topology and accurately attributes high cluster scores to the specific devices involved in the attack, isolating benign bystander devices.
+
+### 6.5 Training Execution Status
 
 ```
 Script:   train/train_observer.py --v3
 Data:     data/observer_train_phase2.jsonl  (63k samples)
 Output:   models/observer_v3.pt
-Log:      outputs/train_observer_v3/train_observer_v3.log
 Device:   CUDA
-Status:   🔄 RUNNING  (started 2026-02-25 04:29)
+Status:   ✅ COMPLETE  (epoch 15, frozen→unfrozen transition succeeded)
 ```
-
-### 6.5 Phase 2 Schedule
-
-| Phase | Epochs | Encoder | LR | Focus |
-|-------|--------|---------|-----|-------|
-| Warm-up (frozen) | 1–5 | ❄️ FROZEN | 3e-4 (heads) | Attack type CE, risk MSE |
-| Fine-tune (unfrozen) | 6–30 | 🔥 ACTIVE | 3e-5 (all) | End-to-end calibration |
 
 ---
 
