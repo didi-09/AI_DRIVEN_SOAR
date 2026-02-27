@@ -891,20 +891,34 @@ gantt
 
 Deploying the DIDI RL models into a live **SOAR (Security Orchestration, Automation, and Response)** engine requires wrapping both the frozen V3 Observer and the trained PPO Agent in a real-time event loop.
 
-### 14.1 Deployment Architecture
+### 14.1 Deployment Architecture (ELK + Suricata Stack)
 
 ```mermaid
 flowchart TD
-    subgraph LIVE_NETWORK["Live Production Environment"]
-        SIEM["SIEM / Log Aggregator
-        (Splunk, ELK, Wazuh)"]
-        NDR["NDR / Telemetry
-        (Zeek, Suricata)"]
+    subgraph LIVE_NETWORK["Live IoT Production Environment"]
+        IOT["IoT Devices
+        (Cameras, Sensors, Gateways)"]
+        SPAN["Network Switch
+        (Span Port / Mirror Port)"]
+    end
+
+    subgraph TELEMETRY["Data Collection & Forwarding"]
+        FB["Filebeat Agents
+        (Host resource metrics)"]
+        SURI["Suricata IDS
+        (Network flows & alerts)"]
+    end
+
+    subgraph ELK["ELK Stack (Central Logging)"]
+        LS["Logstash
+        (Data normalization)"]
+        ES["ElasticSearch
+        (Data lake & search)"]
     end
 
     subgraph SOAR["SOAR Engine Application"]
         INGEST["Data Ingestion Pipeline
-        Maps raw JSON logs to UnifiedSample format"]
+        Maps ES JSON to UnifiedSample"]
         
         OBS_SVC["V3 Observer Microservice
         Loads: observer_v3_meta.json
@@ -915,24 +929,29 @@ flowchart TD
         Executes: Hierarchical Policy"]
 
         ACT_SVC["Action Orchestrator
-        Maps RL Tier/Action IDs → Ansible/API calls"]
+        Transforms Action ID → Mitigation Playbook"]
     end
 
-    SIEM & NDR --> INGEST
+    IOT --> FB
+    SPAN --> SURI
+    FB & SURI --> LS
+    LS --> ES
+    ES --> INGEST
     INGEST --> OBS_SVC
     OBS_SVC -->|14D State Vector| PPO_SVC
     PPO_SVC -->|Action ID| ACT_SVC
-    ACT_SVC -->|Mitigation triggered| LIVE_NETWORK
+    ACT_SVC -.->|Isolate / Rate Limit / Patch| IOT
 ```
 
 ### 14.2 Step-by-Step Implementation
 
 1. **Model Loading:** Load both checkpoints. The Observer must be run in `eval()` mode. The PPO Agent extracts its PyTorch policy network.
-2. **Data Transformation:** Ensure live network logs (e.g., JSON from ElasticSearch) are wrapped inside a list of dictionaries matching the `UnifiedSample` schema.
-3. **Graph Construction:** If managing multiple devices, build the PyTorch `edge_index` based on the known network topology, allowing the Observer's GNN to calculate the `campaign_score`.
-4. **State Construction:** Run the Observer over the raw logs to extract the 14-dimensional state vector.
-5. **Action Decision:** Pass the 14D state to the PPO Agent to receive an action integer (0-13).
-6. **Orchestration:** Map the resulting integer to your SOAR playbooks (e.g., executing an AWS Lambda isolation script or an API call to a Cisco firewall).
+2. **Logstash Mapping:** Configure Logstash to merge Filebeat (host metrics) and Suricata (network logs/alerts) into a unified JSON format grouped by `device_ip` or `device_id`.
+3. **Data Polling:** The SOAR engine polls ElasticSearch periodically to extract the unified JSON logs as a list of dictionaries.
+4. **Graph Construction:** If managing multiple devices, build the PyTorch `edge_index` based on the known network topology, allowing the Observer's GNN to calculate the `campaign_score`.
+5. **State Construction:** Run the Observer over the raw logs to extract the 14-dimensional state vector.
+6. **Action Decision:** Pass the 14D state to the PPO Agent to receive an action integer (0-13).
+7. **Orchestration:** Map the resulting integer to your SOAR playbooks (e.g., executing an AWS Lambda isolation script or an API call to a Cisco firewall).
 
 ### 14.3 Live Deployment Code Example
 
@@ -1033,6 +1052,59 @@ if __name__ == "__main__":
     result = soar_engine.process_live_event(live_log)
     print(f"SOAR AI Engine Output: {json.dumps(result, indent=2)}")
 ```
+
+### 14.4 Required Ingestion Payload Schema
+
+When writing the data pipeline that feeds SIEM/NDR data into the `process_live_event()` method, your orchestrator must map the raw telemetry into a flat or nested dictionary. 
+
+The **V3 Transformer Observer** is extremely flexible and builds its token vocabulary dynamically. However, for maximum accuracy, supply as many of the following standard features as possible. Missing features are safely ignored.
+
+```json
+[
+  {
+    // === Core Host Telemetry (from EDR/Wazuh) ===
+    "cpu_percent": 82.5,          // 0.0 to 100.0
+    "mem_percent": 65.0,          // 0.0 to 100.0
+    "active_conns": 1500,         // Integer
+    "auth_failures": 45,          // Integer count over last 1 min
+    "running_processes": 128,     // Integer
+    "disk_io_tx": 4096.0,         // Bytes
+    
+    // === Level 3 Network Telemetry (from Zeek/Suricata/NetFlow) ===
+    "tx_bps": 1500000.0,          // Bits per second transmitted
+    "rx_bps": 50000.0,            // Bits per second received
+    "pps_out": 2000.0,            // Packets per second out
+    "pps_in": 150.0,              // Packets per second in
+    "unique_dst_ports_1m": 400,   // Rapid port scanning indicator
+    "unique_src_ips_1m": 12,      // Tracking inbound spread
+    "tcp_flags.syn": 450,         // SYN flood indicator
+    "tcp_flags.rst": 20,          // Connection drops
+    "tcp_flags.ack": 1200,        // Traffic flow
+    "avg_packet_size": 1400.0,    // Bytes (high = exfil, low = scan/dos)
+    "dns_query_rate": 8.5,        // DNS tunneling/C2 indicator
+    
+    // === Layer 7 Protocol Telemetry ===
+    "http_reqs_per_sec": 45.0,    // Web application tracking
+    "failed_http_reqs": 12,       // 4xx/5xx errors
+    "tls_handshakes": 5,          // Encrypted channel tracking
+    "icmp_ping_rate": 2.0,        // ICMP flood / discovery
+    
+    // === Flexible Key-Value Logs (from SIEM/Splunk) ===
+    // The Transformer tokenizer parses these as literal strings
+    "alert.signature": "ET SCAN Nmap OS Detection Probe",
+    "log.event_id": "4625",
+    "process.name": "sshd",
+    "network.protocol": "tcp",
+    "user.name": "admin",
+    "file.extension": ".enc",     // Ransomware indicator
+    
+    // === Optional Identifiers for Graphing ===
+    "device_id": "camera_01",
+    "device_type": "camera"
+  }
+]
+```
+*Note: The array can contain a single dictionary (acting on an isolated alert) or a batch of N dictionaries representing all N devices in your topology, which is required if you are passing the `edge_index` to map a multi-stage campaign.*
 
 ### 14.4 Expected SOAR Output
 
