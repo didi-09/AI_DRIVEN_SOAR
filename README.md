@@ -1104,9 +1104,10 @@ The **V3 Transformer Observer** is extremely flexible and builds its token vocab
   }
 ]
 ```
-*Note: The array can contain a single dictionary (acting on an isolated alert) or a batch of N dictionaries representing all N devices in your topology, which is required if you are passing the `edge_index` to map a multi-stage campaign.*
+*Note: The array can contain a single dictionary (acting on isolated telemetry) or a batch of N dictionaries representing all N devices in your topology, which is required if you are passing the `edge_index` to map a multi-stage campaign.*
 
-### 14.4 Expected SOAR Output
+
+### 14.5 Expected SOAR Output
 
 When a live attack (like the high CPU + auth failure telemetry snippet shown above) is ingested into the system, the SOAR deployment code will output a JSON directive triggering the orchestrator:
 
@@ -1123,6 +1124,26 @@ SOAR AI Engine Output: {
 This output successfully instructs the downstream SOAR tools to isolate the compromised device from the network based on the high confidence risk score derived from raw telemetry by the V3 Observer and successfully routed by the PPO Agent.
 
 ---
+
+### 14.6 Deployment File Manifest
+
+To deploy this intelligence stack onto a completely separate production machine, do not copy the `train`, `eval`, `simulator`, or `data` directories. Only the inferencing dependencies and frozen neural weights are required.
+
+**1. Trained Model Checkpoints:**
+* `models/observer_v3.pt` (Phase 2 Frozen Inference Weights)
+* `models/observer_v3_meta.json` (Required for Vocabulary and GNN dimensions)
+* `outputs/ppo_v2/checkpoints/ppo_final.pt` (The resulting Hierarchical action policy network)
+
+**2. Architecture Modules:**
+* `agent/kv_tokenizer.py` (JSON string parsing logic)
+* `agent/transformer_encoder.py` (4-layer Attention Engine)
+* `agent/trainable_observer.py` (Primary class routing: Transformer → 6 Heads + GNN)
+* `agent/ppo_policy.py` (Primary class routing: 14D → Tier Selection → Decision)
+
+**3. Python Environment Dependencies:**
+* `torch` 
+* `torch_geometric` (Required for GNN topological routing)
+* `numpy`
 
 **Document Version**: 9.0.0 — Extended Attack Coverage + V3 Transformer Observer + GNN
 **Last Updated**: 2026-02-28
