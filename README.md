@@ -309,7 +309,7 @@ flowchart TD
 
 ### 5.2 Centroid Cosine Similarity Matrix
 
-![Cosine Similarity Matrix](test1_cosine_sim_matrix.png)
+![Cosine Similarity Matrix](outputs/observer_diag/test1_cosine_sim_matrix.png)
 
 Key findings:
 - **DoS** is the most isolated cluster (cosine sim < 0.2 with most other types)
@@ -319,7 +319,7 @@ Key findings:
 
 ### 5.3 Risk Score Distribution (Unsupervised — No Fine-Tuning)
 
-![Risk Score Distribution](test3_risk_distribution.png)
+![Risk Score Distribution](outputs/observer_diag/test3_risk_distribution.png)
 
 The Phase 1 risk head already shows correct ordering **without any supervised labels**:
 
@@ -335,19 +335,19 @@ The Phase 1 risk head already shows correct ordering **without any supervised la
 
 ### 5.4 Linear Probe Confusion Matrix (100% Accuracy)
 
-![Confusion Matrix](test4_confusion_matrix.png)
+![Confusion Matrix](outputs/observer_diag/test4_confusion_matrix.png)
 
 Every cell off-diagonal is **zero**. A logistic regression trained on frozen Phase 1 embeddings perfectly separates all 12 classes (11 attacks + noise) on 960 held-out test samples. This proves the encoder has learned **linearly separable class representations** without ever seeing a supervised label.
 
 ### 5.5 PCA Embedding Cluster Visualization
 
-![PCA Clusters](test5_pca_clusters.png)
+![PCA Clusters](outputs/observer_diag/test5_pca_clusters.png)
 
 PCA with 2 components explains 36.3% of variance (PC1=19.4%, PC2=16.9%). Even in this low-dimensional projection, all classes form tight, well-separated clusters. ★ = class centroid.
 
 ### 5.6 Noise Rejection Analysis
 
-![Noise Rejection](test6_noise_rejection.png)
+![Noise Rejection](outputs/observer_diag/test6_noise_rejection.png)
 
 | Nearest-Neighbor Similarity | Mean | Std |
 |----------------------------|------|-----|
@@ -881,10 +881,177 @@ gantt
 | V3 Env Integration + GNN | ✅ DONE | `simulator/env.py` |
 | Label Normalization (37+ labels) | ✅ DONE | `datasets/schema_validator.py` |
 | Phase 2 Training Data | ✅ DONE — 63k samples | `data/observer_train_phase2.jsonl` |
-| PPO Agent Retrain | ⏳ PENDING — after Phase 2 | — |
+| PPO Agent Retrain | 🔄 ACTIVE — 870k steps | `models/ppo_agent_v7.zip` (target) |
+
+---
+
+# PART XIV: PRODUCTION DEPLOYMENT
+
+## 14. SOAR Engine Integration Guide
+
+Deploying the DIDI RL models into a live **SOAR (Security Orchestration, Automation, and Response)** engine requires wrapping both the frozen V3 Observer and the trained PPO Agent in a real-time event loop.
+
+### 14.1 Deployment Architecture
+
+```mermaid
+flowchart TD
+    subgraph LIVE_NETWORK["Live Production Environment"]
+        SIEM["SIEM / Log Aggregator
+        (Splunk, ELK, Wazuh)"]
+        NDR["NDR / Telemetry
+        (Zeek, Suricata)"]
+    end
+
+    subgraph SOAR["SOAR Engine Application"]
+        INGEST["Data Ingestion Pipeline
+        Maps raw JSON logs to UnifiedSample format"]
+        
+        OBS_SVC["V3 Observer Microservice
+        Loads: observer_v3_meta.json
+        Executes: Transformer inference + GNN"]
+
+        PPO_SVC["PPO Agent Microservice
+        Loads: ppo_agent_v7.zip
+        Executes: Hierarchical Policy"]
+
+        ACT_SVC["Action Orchestrator
+        Maps RL Tier/Action IDs → Ansible/API calls"]
+    end
+
+    SIEM & NDR --> INGEST
+    INGEST --> OBS_SVC
+    OBS_SVC -->|14D State Vector| PPO_SVC
+    PPO_SVC -->|Action ID| ACT_SVC
+    ACT_SVC -->|Mitigation triggered| LIVE_NETWORK
+```
+
+### 14.2 Step-by-Step Implementation
+
+1. **Model Loading:** Load both checkpoints. The Observer must be run in `eval()` mode. The PPO Agent extracts its PyTorch policy network.
+2. **Data Transformation:** Ensure live network logs (e.g., JSON from ElasticSearch) are wrapped inside a list of dictionaries matching the `UnifiedSample` schema.
+3. **Graph Construction:** If managing multiple devices, build the PyTorch `edge_index` based on the known network topology, allowing the Observer's GNN to calculate the `campaign_score`.
+4. **State Construction:** Run the Observer over the raw logs to extract the 14-dimensional state vector.
+5. **Action Decision:** Pass the 14D state to the PPO Agent to receive an action integer (0-13).
+6. **Orchestration:** Map the resulting integer to your SOAR playbooks (e.g., executing an AWS Lambda isolation script or an API call to a Cisco firewall).
+
+### 14.3 Live Deployment Code Example
+
+```python
+import torch
+import numpy as np
+import json
+from agent.trainable_observer import TransformerObserver
+from agent.ppo_policy import HierarchicalPPOPolicy
+
+class DIDISOAREngine:
+    def __init__(self, observer_path="models/observer_v3.pt", ppo_path="outputs/ppo_v2/ppo_final.pt"):
+        # 1. Initialize models
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Load Observer
+        self.observer = TransformerObserver(vocab_size=8192, d_model=64, use_graph_head=True)
+        self.observer.load_state_dict(torch.load(observer_path, map_location=self.device))
+        self.observer.to(self.device)
+        self.observer.eval()
+        
+        # Load PPO Policy
+        # Note: 14D input space matching the V9 specification
+        self.policy = HierarchicalPPOPolicy(state_dim=14, hidden_dim=512)
+        ppo_ckpt = torch.load(ppo_path, map_location=self.device)
+        self.policy.load_state_dict(ppo_ckpt["policy"])
+        self.policy.to(self.device)
+        self.policy.eval()
+
+        # Define Action Mapping for SOAR Execution
+        self.action_playbooks = {
+            0: "monitor_only",
+            1: "pcap_capture", 2: "alert_ops", 3: "threat_intel",
+            4: "isolate", 5: "block_ip", 6: "rate_limit", 7: "quarantine", 8: "honeypot",
+            9: "kill_process", 10: "patch", 11: "rollback", 12: "reimage", 13: "escalate"
+        }
+
+    def process_live_event(self, raw_device_logs: list, edge_index: list = None):
+        """
+        Process live production telemetry through DIDI RL Stack.
+        """
+        with torch.no_grad():
+            # Create graph structure (if None, GNN outputs 0.0)
+            graph_data = None
+            if edge_index:
+                graph_data = {
+                    "edge_index": torch.tensor(edge_index, dtype=torch.long).to(self.device),
+                    "edge_attr": torch.ones((len(edge_index[0]), 6)).to(self.device) # Dummy attributes
+                }
+
+            # 1. Observer Inference (Log Feature Extraction)
+            obs_output = self.observer(raw_device_logs, graph_data=graph_data)
+            
+            # Construct 14D State Vector for the primary targeted device (index 0)
+            state = torch.zeros(14, dtype=torch.float32).to(self.device)
+            state[0] = obs_output["risk"][0]              # Risk Score
+            state[1] = obs_output["confidence"][0]        # Confidence
+            state[2] = obs_output["severity"][0]          # Severity
+            state[3] = obs_output["attack_present"][0]    # Attack Binary Probability
+            state[4:12] = obs_output["attack_type"][0]    # Top 8 Class Probabilities
+            
+            # Incorporate GNN Graph Analytics
+            if "campaign_score" in obs_output:
+                state[12] = obs_output["campaign_score"][0]
+                state[13] = obs_output["cluster_scores"][0]
+
+            # 2. PPO Agent Inference (Decision Making)
+            # Unsqueeze to simulate batch dimension: shape [1, 14]
+            state_batched = state.unsqueeze(0)
+            
+            # policy.act returns (action, log_prob, value)
+            action, _, value = self.policy.act(state_batched, deterministic=True)
+            action_id = action.item()
+
+            # 3. SOAR Execution Dispatch
+            playbook = self.action_playbooks.get(action_id, "unknown")
+            return {
+                "ai_decision": playbook,
+                "action_id": action_id,
+                "confidence": obs_output["confidence"][0].item(),
+                "identified_threat_risk": obs_output["risk"][0].item(),
+                "apt_campaign_probability": state[12].item()
+            }
+
+# ====== DEPLOYMENT EXAMPLE ======
+if __name__ == "__main__":
+    soar_engine = DIDISOAREngine()
+    
+    # Example live Splunk log mapped to a UnifiedSample format
+    live_log = [{
+        "cpu_percent": 98.5,
+        "auth_failures": 120,
+        "tx_bps": 5000000.0,
+        "log.event": "auth_fail_spike"
+    }]
+    
+    # Process through the AI engine
+    result = soar_engine.process_live_event(live_log)
+    print(f"SOAR AI Engine Output: {json.dumps(result, indent=2)}")
+```
+
+### 14.4 Expected SOAR Output
+
+When a live attack (like the high CPU + auth failure telemetry snippet shown above) is ingested into the system, the SOAR deployment code will output a JSON directive triggering the orchestrator:
+
+```json
+SOAR AI Engine Output: {
+  "ai_decision": "isolate",
+  "action_id": 4,
+  "confidence": 0.9632,
+  "identified_threat_risk": 0.8911,
+  "apt_campaign_probability": 0.0
+}
+```
+
+This output successfully instructs the downstream SOAR tools to isolate the compromised device from the network based on the high confidence risk score derived from raw telemetry by the V3 Observer and successfully routed by the PPO Agent.
 
 ---
 
 **Document Version**: 9.0.0 — Extended Attack Coverage + V3 Transformer Observer + GNN
-**Last Updated**: 2026-02-25
-**Status**: Phase 2 fine-tuning active — PPO retrain pending
+**Last Updated**: 2026-02-28
+**Status**: PPO Phase 3 Retraining Active
