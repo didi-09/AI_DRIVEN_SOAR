@@ -590,14 +590,14 @@ flowchart TD
     V(s) scalar"]
 ```
 
-### 8.2 Action Taxonomy
+### 8.2 Action Taxonomy (V2 Action Space)
 
-| Tier | Actions | Cost | Activation Condition |
-|------|---------|------|---------------------|
-| **0 — Monitor** | `monitor_only` | 0.000 | risk < 0.3, benign |
-| **1 — Investigate** | `pcap_capture`, `alert_ops`, `threat_intel` | 0.005 | risk 0.3–0.5 |
-| **2 — Contain** | `isolate`, `block_ip`, `rate_limit`, `quarantine`, `honeypot` | 0.010 | risk > 0.5 |
-| **3 — Remediate** | `kill_process`, `patch`, `rollback`, `reimage`, `escalate` | 0.050 | risk > 0.7 |
+| Tier | Name | Actions Available | Disruption Cost | Validation |
+|------|------|-------------------|-----------------|------------|
+| **0 — Monitor** | Passive | `monitor_only`, `wait_1_window` | 0 | risk < 0.2, benign |
+| **1 — Investigate** | Evidence | `increase_logging`, `pcap_capture_60s` | 0 | risk 0.2–0.5 |
+| **2 — Contain** | Segregate | `rate_limit_egress_5m`, `block_top_ip_10m`, `isolate_container_10m`, `block_port_10m`, `drop_new_outbound_conns_5m`, `quarantine_vlan_10m` | 1–3 (Moderate) | risk > 0.5 |
+| **3 — Remediate** | Destructive | `restart_container`, `stop_telnet_service`, `rotate_device_credentials`, `trigger_self_restore` | 1–3 (High) | risk > 0.7 |
 
 ---
 
