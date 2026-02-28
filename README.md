@@ -65,11 +65,11 @@ flowchart TD
     subgraph S4["Stage 4 — PPO Training"]
         DIAG --> ENV["CyberRangeEnv
         V3 Observer + GNN Graph Head
-        14D state vector
+        78D state vector (with 64D Graph)
         Multi-stage kill-chain attacks"]
         ENV --> PPO["train_ppo.py
-        HierarchicalPPOPolicy
-        14D input, 512 hidden
+        HierarchicalPPOPolicy + Action Masking
+        78D input, 512 hidden
         500K+ steps, crash-safe"]
         PPO --> AGENT["models/ppo_agent_final.pt"]
     end
@@ -90,14 +90,14 @@ sequenceDiagram
     ENV->>OBS: UnifiedSample batch (all devices)
     OBS->>OBS: KV tokenize → Transformer encode → 64D CLS vector
     OBS->>GNN: Device embeddings + edge_index + edge_attr
-    GNN->>ENV: campaign_score (global) + cluster_scores (per-device)
-    OBS->>PPO: state_vector 14D
-    Note over PPO: [risk, conf, severity,<br/>attack_present, type_probs×11,<br/>campaign_score, cluster_score]
-    PPO->>PPO: Select tier → select action within tier
+    GNN->>ENV: campaign_score, cluster_scores, 64D graph_embedding
+    OBS->>PPO: state_vector 78D
+    Note over PPO: [risk, conf, severity,<br/>attack_present, type_probs×11,<br/>campaign, cluster, 64D Graph]
+    PPO->>PPO: Select tier → select action (with Invalid Masking)
     PPO->>ENV: action_id
-    ENV->>RWD: risk_before, risk_after, label, action, campaign_score
-    RWD->>ENV: reward × CAMPAIGN_MULTIPLIER(1.5 if campaign)
-    ENV->>PPO: next_obs(14D), reward, done, info
+    ENV->>RWD: risk_before, normalized chosen action tier, campaign_score
+    RWD->>ENV: Proportional Alignment Reward × CAMPAIGN_MULTIPLIER
+    ENV->>PPO: next_obs(78D), reward, done, info
 ```
 
 ---
@@ -460,11 +460,11 @@ Status:   ✅ COMPLETE  (epoch 15, frozen→unfrozen transition succeeded)
 
 ## 7. CyberRangeEnv (V9)
 
-### 7.1 14-Dimensional State Vector
+### 7.1 78-Dimensional State Vector (Omni-Graph Lite)
 
 ```mermaid
 classDiagram
-    class StateVector_14D {
+    class StateVector_78D {
         +float risk_score         [0] observer risk ∈ [0,1]
         +float confidence         [1] observer confidence ∈ [0,1]
         +float severity           [2] attack severity ∈ [0,1]
@@ -479,19 +479,19 @@ classDiagram
         +float telemetry_conns    [11] normalized connections
         +float campaign_score     [12] GNN global campaign signal
         +float cluster_membership [13] GNN per-device cluster score
+        +float[] graph_embedding  [14-77] Raw 64D Agent topology structure
     }
 ```
 
-> **Indices 12–13 are populated by `_run_v3_observer()`** which processes all device embeddings through the GNN graph head using `WorldState.build_edge_index()` for topology. Zero when V3 observer not loaded or no graph data.
+> **Indices 12–77 are populated by `_run_v3_observer()`** which processes all device embeddings through the GNN graph head using `WorldState.build_edge_index()` for topology.
 
-### 7.2 Reward Function (V9 — Campaign-Aware)
+### 7.2 Reward Function (Omni-Graph Lite Proportional Alignment)
 
 ```mermaid
 flowchart TD
     subgraph IN["Inputs"]
         RB["risk_before"]
         RA["risk_after"]
-        LBL["gt_label  (0–10)"]
         ACT["action tier (0–3)"]
         CS["campaign_score  GNN signal"]
     end
@@ -499,29 +499,22 @@ flowchart TD
     subgraph COMP["Reward Components"]
         RR["risk_reduction
         = (risk_before − risk_after) × 2.0"]
-        TB["threat_bonus
-        = 2.0 × label_factor
-        if attack AND tier ≥ 2 AND risk drops"]
+        ALIGN["Proportional Alignment
+        = 1.0 - abs( (tier/3.0) - risk_before )
+        *reward mapped continuously from [-1.0, 1.0]*"]
         CB["calm_bonus = 0.15
         if risk_after < 0.2 AND benign
         ↑ raised from 0.05 to discourage passivity"]
-        AC["action_cost
-        tier-scaled × cost_scale"]
-        FP["fp_penalty = 0.1 × tier
-        if benign AND tier ≥ 2"]
-        STP["stall_penalty = 0.40
-        if watching AND attack AND risk > 0.25
-        ↑ raised from 0.20 to force action"]
     end
 
     IN --> COMP
 
-    COMP --> BASE["base_reward = RR + TB + CB − AC − FP − STP"]
+    COMP --> BASE["base_reward = RR + ALIGN + CB"]
 
     BASE --> CAMP["CAMPAIGN_MULTIPLIER
-        if campaign_score > 0.5:
-            reward × 1.5
-        (amplifies correct responses to coordinated attacks)"]
+        if campaign_score > 0.6:
+            ALIGN reward × 1.5
+        (amplifies perfectly aligned responses to coordinated attacks)"]
 
     CAMP --> CLIP["clip(reward, −1.0, +1.0)"]
 ```
@@ -564,13 +557,16 @@ Edges are **dynamically removed** when a device is isolated by the agent. This m
 ### 8.1 Policy Network
 
 ```mermaid
+### 8.1 Policy Network
+
+```mermaid
 flowchart TD
-    SV["14D State Vector
+    SV["78D State Vector
     risk, conf, sev, attack_present
     type_probs×5, telem×3
-    campaign_score, cluster_score"]
+    campaign_score, cluster_score, 64D Graph"]
 
-    SV --> E1["Linear(14→512) + ReLU + LayerNorm"]
+    SV --> E1["Linear(78→512) + ReLU + LayerNorm"]
     E1 --> E2["Linear(512→512) + ReLU + LayerNorm"]
     E2 --> FEAT["512D Feature Vector"]
 
@@ -739,7 +735,7 @@ DIDI RL/
 │   ├── transformer_encoder.py    LogTransformerEncoder — 4-layer Transformer
 │   ├── trainable_observer.py     TrainableObserver (V2) + TransformerObserver (V3)
 │   ├── losses.py                 ObserverLoss, NTXentLoss, V3ObserverLoss
-│   └── ppo_policy.py             HierarchicalPPOPolicy (14D input)
+│   └── ppo_policy.py             HierarchicalPPOPolicy (78D input)
 │
 ├── simulator/
 │   ├── config.py                 11 LABEL_* constants + MULTI_STAGE_CHAINS
@@ -938,7 +934,7 @@ flowchart TD
     LS --> ES
     ES --> INGEST
     INGEST --> OBS_SVC
-    OBS_SVC -->|14D State Vector| PPO_SVC
+    OBS_SVC -->|78D State Vector| PPO_SVC
     PPO_SVC -->|Action ID| ACT_SVC
     ACT_SVC -.->|Isolate / Rate Limit / Patch| IOT
 ```
@@ -949,8 +945,8 @@ flowchart TD
 2. **Logstash Mapping:** Configure Logstash to merge Filebeat (host metrics) and Suricata (network logs/alerts) into a unified JSON format grouped by `device_ip` or `device_id`.
 3. **Data Polling:** The SOAR engine polls ElasticSearch periodically to extract the unified JSON logs as a list of dictionaries.
 4. **Graph Construction:** If managing multiple devices, build the PyTorch `edge_index` based on the known network topology, allowing the Observer's GNN to calculate the `campaign_score`.
-5. **State Construction:** Run the Observer over the raw logs to extract the 14-dimensional state vector.
-6. **Action Decision:** Pass the 14D state to the PPO Agent to receive an action integer (0-13).
+5. **State Construction:** Run the Observer over the raw logs to extract the 78-dimensional state vector (including the 64D Graph topology).
+6. **Action Decision:** Pass the 78D state to the PPO Agent to receive an action integer (0-13).
 7. **Orchestration:** Map the resulting integer to your SOAR playbooks (e.g., executing an AWS Lambda isolation script or an API call to a Cisco firewall).
 
 ### 14.3 Live Deployment Code Example
@@ -974,8 +970,8 @@ class DIDISOAREngine:
         self.observer.eval()
         
         # Load PPO Policy
-        # Note: 14D input space matching the V9 specification
-        self.policy = HierarchicalPPOPolicy(state_dim=14, hidden_dim=512)
+        # Note: 78D input space matching the Omni-Graph Lite specification
+        self.policy = HierarchicalPPOPolicy(state_dim=78, hidden_dim=512)
         ppo_ckpt = torch.load(ppo_path, map_location=self.device)
         self.policy.load_state_dict(ppo_ckpt["policy"])
         self.policy.to(self.device)
@@ -1005,8 +1001,8 @@ class DIDISOAREngine:
             # 1. Observer Inference (Log Feature Extraction)
             obs_output = self.observer(raw_device_logs, graph_data=graph_data)
             
-            # Construct 14D State Vector for the primary targeted device (index 0)
-            state = torch.zeros(14, dtype=torch.float32).to(self.device)
+            # Construct 78D State Vector for the primary targeted device (index 0)
+            state = torch.zeros(78, dtype=torch.float32).to(self.device)
             state[0] = obs_output["risk"][0]              # Risk Score
             state[1] = obs_output["confidence"][0]        # Confidence
             state[2] = obs_output["severity"][0]          # Severity
@@ -1017,9 +1013,10 @@ class DIDISOAREngine:
             if "campaign_score" in obs_output:
                 state[12] = obs_output["campaign_score"][0]
                 state[13] = obs_output["cluster_scores"][0]
+                state[14:78] = obs_output["graph_embedding"][0] # 64D Topology
 
             # 2. PPO Agent Inference (Decision Making)
-            # Unsqueeze to simulate batch dimension: shape [1, 14]
+            # Unsqueeze to simulate batch dimension: shape [1, 78]
             state_batched = state.unsqueeze(0)
             
             # policy.act returns (action, log_prob, value)
@@ -1106,8 +1103,27 @@ The **V3 Transformer Observer** is extremely flexible and builds its token vocab
 ```
 *Note: The array can contain a single dictionary (acting on isolated telemetry) or a batch of N dictionaries representing all N devices in your topology, which is required if you are passing the `edge_index` to map a multi-stage campaign.*
 
+### 14.5 Deployment File Manifest
 
-### 14.5 Expected SOAR Output
+To deploy this intelligence stack onto a completely separate production machine, do not copy the `train`, `eval`, `simulator`, or `data` directories. Only the inferencing dependencies and frozen neural weights are required.
+
+**1. Trained Model Checkpoints:**
+* `models/observer_v3.pt` (Phase 2 Frozen Inference Weights)
+* `models/observer_v3_meta.json` (Required for Vocabulary and GNN dimensions)
+* `outputs/ppo_v2/checkpoints/ppo_final.pt` (The resulting Hierarchical action policy network)
+
+**2. Architecture Modules:**
+* `agent/kv_tokenizer.py` (JSON string parsing logic)
+* `agent/transformer_encoder.py` (4-layer Attention Engine)
+* `agent/trainable_observer.py` (Primary class routing: Transformer → 6 Heads + GNN)
+* `agent/ppo_policy.py` (Primary class routing: 78D → Tier Selection → Decision)
+
+**3. Python Environment Dependencies:**
+* `torch` 
+* `torch_geometric` (Required for GNN topological routing)
+* `numpy`
+
+### 14.4 Expected SOAR Output
 
 When a live attack (like the high CPU + auth failure telemetry snippet shown above) is ingested into the system, the SOAR deployment code will output a JSON directive triggering the orchestrator:
 
@@ -1125,26 +1141,6 @@ This output successfully instructs the downstream SOAR tools to isolate the comp
 
 ---
 
-### 14.6 Deployment File Manifest
-
-To deploy this intelligence stack onto a completely separate production machine, do not copy the `train`, `eval`, `simulator`, or `data` directories. Only the inferencing dependencies and frozen neural weights are required.
-
-**1. Trained Model Checkpoints:**
-* `models/observer_v3.pt` (Phase 2 Frozen Inference Weights)
-* `models/observer_v3_meta.json` (Required for Vocabulary and GNN dimensions)
-* `outputs/ppo_v2/checkpoints/ppo_final.pt` (The resulting Hierarchical action policy network)
-
-**2. Architecture Modules:**
-* `agent/kv_tokenizer.py` (JSON string parsing logic)
-* `agent/transformer_encoder.py` (4-layer Attention Engine)
-* `agent/trainable_observer.py` (Primary class routing: Transformer → 6 Heads + GNN)
-* `agent/ppo_policy.py` (Primary class routing: 14D → Tier Selection → Decision)
-
-**3. Python Environment Dependencies:**
-* `torch` 
-* `torch_geometric` (Required for GNN topological routing)
-* `numpy`
-
-**Document Version**: 9.0.0 — Extended Attack Coverage + V3 Transformer Observer + GNN
+**Document Version**: 10.0.0 — Extended Attack Coverage + V3 Transformer Observer + Omni-Graph Lite
 **Last Updated**: 2026-02-28
 **Status**: PPO Phase 3 Retraining Active
