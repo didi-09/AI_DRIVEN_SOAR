@@ -92,7 +92,7 @@ sequenceDiagram
     OBS->>GNN: Device embeddings + edge_index + edge_attr
     GNN->>ENV: campaign_score, cluster_scores, 64D graph_embedding
     OBS->>PPO: state_vector 78D
-    Note over PPO: [risk, conf, severity,<br/>attack_present, type_probs×11,<br/>campaign, cluster, 64D Graph]
+    Note over PPO: risk, conf, severity,<br/>attack_present, type_probs×11,<br/>campaign, cluster, 64D Graph
     PPO->>PPO: Select tier → select action (with Invalid Masking)
     PPO->>ENV: action_id
     ENV->>RWD: risk_before, normalized chosen action tier, campaign_score
@@ -479,7 +479,7 @@ classDiagram
         +float telemetry_conns    [11] normalized connections
         +float campaign_score     [12] GNN global campaign signal
         +float cluster_membership [13] GNN per-device cluster score
-        +float[] graph_embedding  [14-77] Raw 64D Agent topology structure
+        +float_array graph_embedding  (14-77) Raw 64D Agent topology structure
     }
 ```
 
@@ -500,8 +500,8 @@ flowchart TD
         RR["risk_reduction
         = (risk_before − risk_after) × 2.0"]
         ALIGN["Proportional Alignment
-        = 1.0 - abs( (tier/3.0) - risk_before )
-        *reward mapped continuously from [-1.0, 1.0]*"]
+        = 1.0 - abs( tier/3.0 - risk_before )
+        reward mapped continuously from -1.0 to 1.0"]
         CB["calm_bonus = 0.15
         if risk_after < 0.2 AND benign
         ↑ raised from 0.05 to discourage passivity"]
@@ -554,9 +554,6 @@ Edges are **dynamically removed** when a device is isolated by the agent. This m
 
 ## 8. HierarchicalPPOPolicy
 
-### 8.1 Policy Network
-
-```mermaid
 ### 8.1 Policy Network
 
 ```mermaid
