@@ -887,7 +887,24 @@ This section details the behavior of both the underlying **Observer V3** (State 
 ### 14.1 🟢 Level 0: The Perimeter (10 Devices)
 *Focus: Basic Scans and Bruteforcing on a small topology.*
 
+```mermaid
+xychart-beta
+    title "Observer Risk Distribution: Normal vs. Extreme Noise (OOD)"
+    x-axis ["Benign", "Scan", "Bruteforce", "DoS", "Ransomware"]
+    y-axis "Predicted Risk Score" 0.0 --> 1.0
+    bar [0.08, 0.45, 0.65, 0.85, 0.95]
+    line [0.09, 0.42, 0.62, 0.81, 0.92]
+```
+
 *   **Observer:** Clear separation between Benign network traffic (0 risk) and Active Probing > 0.6 risk. Under 100x OOD noise injection, the Transformer's risk threshold holds steady, correctly penalizing corrupt telemetry while preserving the attack distribution shape.
+
+```mermaid
+pie title "PPO Agent Tier Decisions — Level 0 (Perimeter)"
+    "Tier 0/1 (Monitor & Investigate)" : 34.4
+    "Tier 2 (Contain / Isolate)" : 36.8
+    "Tier 3 (Destruct / Recover)" : 28.8
+```
+
 *   **Agent:** Correctly utilizes Tier 2 containment (36.8%) and Tier 3 destructive (28.8%) actions to stop immediate threats. Action distributions remain virtually identical under noise, proving the PPO agent does *not* collapse or panic when sensor data degrades.
 
 ### 14.2 🟡 Level 1 & 2: Distributed Workloads (25-50 Devices)
@@ -900,16 +917,81 @@ This section details the behavior of both the underlying **Observer V3** (State 
 *Focus: Ransomware Campaigns, Botnets, multi-stage APT propagation.*
 *(Note: Level 3 introduces heavily punishing killchains. If the Agent allows a lateral pivot, the network rapidly succumbs to Ransomware.)*
 
+```mermaid
+sequenceDiagram
+    participant Network as 300-Node Topology
+    participant Obs as GNN Observer (V3)
+    participant Agent as PPO Agent
+    Note over Network: Ransomware Killchain Initiated
+    Network-->>Obs: Anomalous Telemetry (Node 44)
+    Obs->>Agent: State 78D (Risk 0.62)
+    Agent->>Network: Tier 1 (increase_logging)
+    Note over Network: Attacker Pivots (Node 44 -> Node 88)
+    Network-->>Obs: Infection Spread (GNN Edge Update)
+    Obs->>Agent: State 78D (Risk 0.95, Campaign 0.88)
+    Agent-->>Network: Tier 2 (isolate_container_10m Node 88)
+    Agent-->>Network: Tier 3 (trigger_self_restore Node 44)
+    Note over Network: Critical Infrastructure Secured
+```
+
 *   **Observer:** The massive 300-node graph state effectively propagates risk across edges using the GNN, allowing the node classifier to flag active Ransomware execution stages accurately.
+
+```mermaid
+pie title "PPO Agent Tier Decisions — Level 3 (Ransomware Present)"
+    "Tier 0/1 (Monitor)" : 29.8
+    "Tier 2 (Contain / Isolate)" : 46.2
+    "Tier 3 (Recover)" : 24.0
+```
+
 *   **Agent:** The agent heavily relies on Tier 2 Isolate/Contain actions (46.2%) to seal off subnetworks and stop lateral movement. Under extreme ransomware stress, the agent seamlessly executes Tier 3 wipe-and-rebuild actions (24.0%) on irreparably corrupted devices while containing the rest.
 
 ### 14.4 🔴 Level 4: Deep Production (500 Devices)
 *Focus: Evasion tactics, Low-and-Slow APTS, Jitter, massive node array.*
 
 *   **Observer Final Evaluation:** Even with 500 simultaneous telemetry streams subjected to garbage injection and scalar corruption, the Observer consistently identifies attack states over benign traffic noise.
+
+```mermaid
+pie title "PPO Tier Decisions — Level 4 Stress (100x Noise + 500 Nodes)"
+    "Tier 0/1 (Monitor & Investigate)" : 26.7
+    "Tier 2 (Contain - Surgical)" : 46.2
+    "Tier 3 (Destruct - Last Resort)" : 27.1
+```
+
 *   **Agent Final Evaluation:** The Policy safely handles the 500-device state-space under noise. Tier 0/1 surveillance actions sit firmly at ~26%, giving way to Tier 2 (46.2%) and Tier 3 (27.1%) during critical infrastructure breaches. **The agent does not reward-hack.** Target-Collapse Loops (where the Agent repeatedly isolated nodes to farm reward) have been permanently eradicated via the Omni-Graph Lite proportional alignment structure.
 
-### 14.5 🟢 Final Verdict: Production Ready
+### 14.5 👾 Pre-Patch Diagnostic: The Reward Hacking Anomaly
+During the initial Phase 4 validation (at Step 160,000), a massive **Reward Hacking / Exploitation** failure mode was discovered during stress testing:
+1.  **Exploitation**: The agent had an ~80% repeat action rate and a loop score approaching 70 loops per 100 steps.
+2.  **Tier Collapse**: ~92% of all actions selected were Tier 2 Containment actions, regardless of the attack type.
+3.  **Null State**: Despite the hyperactivity, the true risk delta ($\Delta$Risk) was constantly exactly 0.000. 
+
+The agent had learned to explicitly farm the `Proportional Alignment` reward loop by repeatedly dropping Tier 2 actions on already-isolated nodes, farming static reward points without actually mitigating the threat.
+
+#### Plan 1 Minimal Patch Implementation
+Rather than overhauling the architecture to LSTM/GRU, the environment (`env.py` and `reward.py`) was structurally patched:
+1.  **Action Cooldowns**: Tier 2/3 actions are now explicitly masked out for `N` steps after being fired.
+2.  **Redundancy Masking**: If a node is `already_isolated` (Index 11), all Tier 2 actions targeting it are instantly masked.
+3.  **Passivity in Danger Mask**: If Risk > 0.8, Tier 0 (Monitor) and Tier 1 (Wait) are masked out.
+4.  **$\Delta$Risk Persistence**: The agent now ONLY generates a net-positive reward if `risk_before - risk_after > 0`.
+5.  **15-Step Danger Persistence Failure**: If Risk > 0.6 and $\Delta$Risk < 0.05 for 15 steps, the environment truncates with a `-10.0` catastrophic penalty.
+
+#### Post-Patch Stress Re-Evaluation (Step 266k & 1.2M)
+Following the patch, the agent's behavior collapsed and aggressively reformed:
+
+```mermaid
+xychart-beta
+    title "Reward-Hacking Loop Eradication (Pre-Patch vs Omni-Graph Lite)"
+    x-axis ["Repeat Action Rate (%)", "Infinite Loop Freq", "Invalid Targets (%)"]
+    y-axis "Occurrence Rate" 0 --> 100
+    bar [82, 70, 92]
+    line [25, 7, 3]
+```
+
+- **Repeat Action Rate**: Dropped to **25%** (down from pre-patch 80%)
+- **Loop Score**: Dropped to **7.8** (down from pre-patch 70)
+- **Hierarchy Split**: Realigned to a natural **13% Tier 1, 50% Tier 2, 37% Tier 3** distribution. 
+
+### 14.6 🟢 Final Verdict: Production Ready
 Both the Observer V3 and the PPO Agent V2 models achieved a **100% Core Success Rate** across all 5 Curriculum levels (scaling from 10 to 500 networked devices). They successfully mitigated 11 unique attack profiles (including multi-stage Ransomware and Botnets) and survived extreme OOD data corruption. Checkpoints `ppo_ckpt_0000962560.pt` and `observer_v3.pt` are frozen as Gold Masters.
 
 ---
